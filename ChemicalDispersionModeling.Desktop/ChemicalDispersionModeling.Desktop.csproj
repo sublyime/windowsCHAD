@@ -1,0 +1,52 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyTitle>Chemical Dispersion Modeling</AssemblyTitle>
+    <AssemblyDescription>Advanced chemical dispersion modeling for urban areas</AssemblyDescription>
+    <Company>Chemical Dispersion Solutions</Company>
+    <Product>Chemical Dispersion Modeling</Product>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core Framework Packages -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+    
+    <!-- Database Packages -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3537.50" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.0" />
+    
+    <!-- HTTP Client for Weather APIs -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="System.IO.Ports" Version="9.0.9" />
+    <PackageReference Include="System.Net.Http.Json" Version="8.0.0" />
+    
+    <!-- GIS and Mapping (we'll use a lightweight mapping solution) -->
+    <PackageReference Include="Microsoft.Toolkit.Mvvm" Version="7.1.2" />
+    
+    <!-- JSON Processing -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Net.Sockets" Version="4.3.0" />
+    
+    <!-- Async Processing -->
+    <PackageReference Include="System.Reactive" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ChemicalDispersionModeling.Core\ChemicalDispersionModeling.Core.csproj" />
+    <ProjectReference Include="..\ChemicalDispersionModeling.Data\ChemicalDispersionModeling.Data.csproj" />
+  </ItemGroup>
+
+</Project>

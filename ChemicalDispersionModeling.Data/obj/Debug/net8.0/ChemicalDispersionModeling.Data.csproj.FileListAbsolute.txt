@@ -1,0 +1,17 @@
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Data.deps.json
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Data.runtimeconfig.json
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Data.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Data.pdb
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Core.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Data\bin\Debug\net8.0\ChemicalDispersionModeling.Core.pdb
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.csproj.AssemblyReference.cache
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.GeneratedMSBuildEditorConfig.editorconfig
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.AssemblyInfoInputs.cache
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.AssemblyInfo.cs
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.csproj.CoreCompileInputs.cache
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\Chemical.07FE1DCA.Up2Date
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\refint\ChemicalDispersionModeling.Data.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.pdb
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.genruntimeconfig.cache
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ref\ChemicalDispersionModeling.Data.dll
