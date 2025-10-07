@@ -277,6 +277,8 @@
                                 
                                 <Button Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Content="🔄 Refresh Weather" Command="{Binding RefreshWeatherCommand}" Margin="0,2,0,2"/>
                                 <Button Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="🧪 Test Location Update" Click="TestLocationUpdate_Click" Margin="0,2,0,2" Background="LightYellow"/>
+                                <Button Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="🗺️ Test Map Click" Click="TestMapClick_Click" Margin="0,2,0,2" Background="LightBlue"/>
+                                <Button Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="🔧 Open DevTools" Click="OpenDevTools_Click" Margin="0,2,0,2" Background="LightGreen"/>
                             </Grid>
                         </GroupBox>
                     </StackPanel>

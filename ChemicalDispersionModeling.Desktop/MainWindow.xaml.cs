@@ -300,18 +300,9 @@ public partial class MainWindow : Window
                 }
             });
 
-            // Clear any existing release markers first
-            _logger?.LogInformation($"=== CLEARING EXISTING MARKERS ====");
-            if (_realMappingService != null)
-            {
-                _logger?.LogInformation($"Calling ClearReleaseMarkersAsync");
-                await _realMappingService.ClearReleaseMarkersAsync();
-                _logger?.LogInformation($"Markers cleared successfully");
-            }
-            else
-            {
-                _logger?.LogError("RealMappingService is null - cannot clear markers!");
-            }
+            // Clear any existing release markers first - JavaScript already handles this
+            _logger?.LogInformation($"=== MARKERS HANDLED BY JAVASCRIPT ====");
+            _logger?.LogInformation($"JavaScript addReleaseMarker automatically clears previous markers");
             
             // Fetch weather data for the new location
             _logger?.LogInformation($"=== STARTING WEATHER UPDATE ====");
@@ -328,9 +319,11 @@ public partial class MainWindow : Window
             
             // Add a release source marker at the clicked location
             _logger?.LogInformation($"=== ADDING NEW RELEASE MARKER ====");
-            if (_realMappingService != null && _viewModel != null)
+            _logger?.LogInformation($"Release marker already added by JavaScript - skipping AddReleaseSourceAsync");
+            
+            // Just update the view model data without adding another marker
+            if (_viewModel != null)
             {
-                _logger?.LogInformation($"Creating release object for marker");
                 var release = new Release
                 {
                     Name = "Release Point",
@@ -350,9 +343,7 @@ public partial class MainWindow : Window
                     Scenario = _viewModel.ReleaseScenario
                 };
                 
-                _logger?.LogInformation($"Calling AddReleaseSourceAsync with release at {release.Latitude:F6}, {release.Longitude:F6}");
-                await _realMappingService.AddReleaseSourceAsync(release);
-                _logger?.LogInformation($"Release marker added successfully");
+                _logger?.LogInformation($"Release data updated for coordinates {release.Latitude:F6}, {release.Longitude:F6}");
                 
                 Dispatcher.Invoke(() =>
                 {
@@ -427,6 +418,81 @@ public partial class MainWindow : Window
         {
             Console.WriteLine($"Error in test location update: {ex.Message}");
             _logger?.LogError(ex, "Error in test location update");
+        }
+    }
+
+    private void TestMapClick_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Console.WriteLine("=== TEST MAP CLICK BUTTON PRESSED ===");
+            MessageBox.Show("Testing map click functionality...", "Map Test", MessageBoxButton.OK, MessageBoxImage.Information);
+            
+            // Test if WebView2 is accessible
+            if (_mapWebView != null)
+            {
+                Console.WriteLine($"WebView2 found: {_mapWebView.Source}");
+                MessageBox.Show($"WebView2 Status:\nFound: Yes\nSource: {_mapWebView.Source}\nCoreWebView2: {(_mapWebView.CoreWebView2 != null ? "Initialized" : "Not Initialized")}", 
+                    "WebView2 Status", MessageBoxButton.OK, MessageBoxImage.Information);
+                
+                // Try to manually trigger a map click event for testing
+                if (_realMappingService != null)
+                {
+                    Console.WriteLine("Manually triggering map click event...");
+                    var testArgs = new MapClickEventArgs
+                    {
+                        Latitude = 29.7604, // Houston coordinates
+                        Longitude = -95.3698,
+                        ScreenX = 100,
+                        ScreenY = 100,
+                        IsRightClick = false
+                    };
+                    
+                    // Manually call the map click handler
+                    OnMapClicked(_realMappingService, testArgs);
+                    MessageBox.Show("Manual map click event triggered!", "Test Result", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show("RealMappingService is null!", "Test Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            else
+            {
+                MessageBox.Show("WebView2 not found!", "Test Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Test Map Click Error: {ex.Message}");
+            MessageBox.Show($"Test Map Click Error: {ex.Message}", "Error", 
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void OpenDevTools_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Console.WriteLine("=== OPENING WEBVIEW2 DEV TOOLS ===");
+            
+            if (_mapWebView?.CoreWebView2 != null)
+            {
+                _mapWebView.CoreWebView2.OpenDevToolsWindow();
+                MessageBox.Show("Developer Tools opened! Check the Console tab to see JavaScript output.", 
+                    "Dev Tools", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show("WebView2 CoreWebView2 not initialized yet!", 
+                    "Dev Tools Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Open Dev Tools Error: {ex.Message}");
+            MessageBox.Show($"Error opening dev tools: {ex.Message}", "Error", 
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

@@ -319,3 +319,4 @@ C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Desktop\obj\Debug\n
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Desktop\obj\Debug\net8.0-windows\ChemicalDispersionModeling.Desktop.pdb
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Desktop\obj\Debug\net8.0-windows\ChemicalDispersionModeling.Desktop.genruntimeconfig.cache
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Desktop\obj\Debug\net8.0-windows\ref\ChemicalDispersionModeling.Desktop.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Desktop\obj\Debug\net8.0-windows\ChemicalDispersionModeling.Desktop.sourcelink.json

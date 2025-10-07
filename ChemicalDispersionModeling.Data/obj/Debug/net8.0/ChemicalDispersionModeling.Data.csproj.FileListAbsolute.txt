@@ -33,3 +33,4 @@ C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Data\obj\Debug\net8
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.pdb
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.genruntimeconfig.cache
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ref\ChemicalDispersionModeling.Data.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Data\obj\Debug\net8.0\ChemicalDispersionModeling.Data.sourcelink.json

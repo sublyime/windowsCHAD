@@ -383,41 +383,98 @@ public class RealMappingService : IRealMappingService
 
     private void OnCoreWebView2InitializationCompleted(object? sender, CoreWebView2InitializationCompletedEventArgs e)
     {
+        Console.WriteLine("=== OnCoreWebView2InitializationCompleted called ===");
+        System.Diagnostics.Debug.WriteLine("=== OnCoreWebView2InitializationCompleted called ===");
+        
         if (e.IsSuccess && _webView?.CoreWebView2 != null)
         {
             // Add JavaScript bridge for map events
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
             Console.WriteLine("=== C# WebMessageReceived handler attached! ===");
+            System.Diagnostics.Debug.WriteLine("=== C# WebMessageReceived handler attached! ===");
+            
+            // Show a message box to confirm initialization
+            System.Windows.MessageBox.Show("WebView2 initialized and WebMessageReceived handler attached!", 
+                "Initialization Success", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
             
             _logger.LogInformation("WebView2 initialization completed successfully");
         }
         else
         {
             Console.WriteLine($"=== WebView2 initialization failed: {e.InitializationException?.Message} ===");
+            System.Diagnostics.Debug.WriteLine($"=== WebView2 initialization failed: {e.InitializationException?.Message} ===");
+            
+            System.Windows.MessageBox.Show($"WebView2 initialization failed: {e.InitializationException?.Message}", 
+                "Initialization Failed", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            
             _logger.LogError($"WebView2 initialization failed: {e.InitializationException?.Message}");
         }
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        // Use multiple output methods to ensure we see the message
         Console.WriteLine("=== C# WebMessage Received! ===");
+        System.Diagnostics.Debug.WriteLine("=== C# WebMessage Received! ===");
+        
         try
         {
-            var message = e.TryGetWebMessageAsString();
-            Console.WriteLine($"Message: {message}");
-            var data = JsonSerializer.Deserialize<Dictionary<string, object>>(message);
-            
-            if (data?.ContainsKey("type") == true)
+            // Try different ways to get the message
+            string message;
+            try 
             {
-                Console.WriteLine($"Message type: {data["type"]}");
-                switch (data["type"].ToString())
+                message = e.TryGetWebMessageAsString();
+            }
+            catch (Exception ex1)
+            {
+                Console.WriteLine($"TryGetWebMessageAsString failed: {ex1.Message}");
+                try 
+                {
+                    message = e.WebMessageAsJson;
+                }
+                catch (Exception ex2)
+                {
+                    Console.WriteLine($"WebMessageAsJson failed: {ex2.Message}");
+                    System.Windows.MessageBox.Show($"Failed to get message content!\nTryGetWebMessageAsString: {ex1.Message}\nWebMessageAsJson: {ex2.Message}", 
+                        "Message Retrieval Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                    return;
+                }
+            }
+            
+            Console.WriteLine($"Message: {message}");
+            System.Diagnostics.Debug.WriteLine($"Message: {message}");
+            
+            // Parse JSON more carefully
+            using var document = JsonDocument.Parse(message);
+            var root = document.RootElement;
+            
+            if (root.TryGetProperty("type", out var typeElement))
+            {
+                var messageType = typeElement.GetString();
+                Console.WriteLine($"Message type: {messageType}");
+                System.Diagnostics.Debug.WriteLine($"Message type: {messageType}");
+                
+                switch (messageType)
                 {
                     case "mapClick":
                         Console.WriteLine("Calling HandleMapClick");
-                        HandleMapClick(data);
+                        HandleMapClick(root);
                         break;
                     case "mapViewChanged":
-                        HandleMapViewChanged(data);
+                        HandleMapViewChanged(root);
+                        break;
+                    case "test":
+                        Console.WriteLine("=== Test message received from JavaScript! ===");
+                        System.Diagnostics.Debug.WriteLine("=== Test message received from JavaScript! ===");
+                        if (root.TryGetProperty("message", out var testMessage))
+                        {
+                            Console.WriteLine($"Test message content: {testMessage.GetString()}");
+                            System.Diagnostics.Debug.WriteLine($"Test message content: {testMessage.GetString()}");
+                        }
+                        
+                        // Show success message for test
+                        System.Windows.MessageBox.Show($"Test message received successfully!\nMessage: {testMessage.GetString()}", 
+                            "Communication Test Success", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
                         break;
                 }
             }
@@ -425,41 +482,62 @@ public class RealMappingService : IRealMappingService
         catch (Exception ex)
         {
             Console.WriteLine($"Error: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Error: {ex.Message}");
             _logger.LogError(ex, "Error processing web message");
+            
+            // Show error in message box too
+            System.Windows.MessageBox.Show($"WebMessage Error!\nError: {ex.Message}\nStack: {ex.StackTrace}", 
+                "Debug Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
         }
     }
 
-    private void HandleMapClick(Dictionary<string, object> data)
+    private void HandleMapClick(JsonElement data)
     {
-        if (data.ContainsKey("lat") && data.ContainsKey("lng"))
+        if (data.TryGetProperty("lat", out var latElement) && 
+            data.TryGetProperty("lng", out var lngElement))
         {
+            var latitude = latElement.GetDouble();
+            var longitude = lngElement.GetDouble();
+            
             var args = new MapClickEventArgs
             {
-                Latitude = Convert.ToDouble(data["lat"]),
-                Longitude = Convert.ToDouble(data["lng"]),
-                ScreenX = data.ContainsKey("x") ? Convert.ToDouble(data["x"]) : 0,
-                ScreenY = data.ContainsKey("y") ? Convert.ToDouble(data["y"]) : 0,
-                IsRightClick = data.ContainsKey("rightClick") && Convert.ToBoolean(data["rightClick"])
+                Latitude = latitude,
+                Longitude = longitude,
+                ScreenX = data.TryGetProperty("x", out var xElement) ? xElement.GetDouble() : 0,
+                ScreenY = data.TryGetProperty("y", out var yElement) ? yElement.GetDouble() : 0,
+                IsRightClick = data.TryGetProperty("rightClick", out var rightClickElement) && rightClickElement.GetBoolean()
             };
 
+            Console.WriteLine($"=== Triggering MapClicked event for coordinates: {args.Latitude:F6}, {args.Longitude:F6} ===");
+            Console.WriteLine($"Release marker should already be added by JavaScript");
+            
             MapClicked?.Invoke(this, args);
+            
+            // Show success message
+            System.Windows.MessageBox.Show($"Map Click Processed!\nLat: {args.Latitude:F6}\nLng: {args.Longitude:F6}\nRelease marker updated!", 
+                "Map Click Success", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
         }
     }
 
-    private void HandleMapViewChanged(Dictionary<string, object> data)
+    private void HandleMapViewChanged(JsonElement data)
     {
-        var args = new MapViewChangedEventArgs
+        if (data.TryGetProperty("centerLat", out var centerLatElement) &&
+            data.TryGetProperty("centerLng", out var centerLngElement) &&
+            data.TryGetProperty("zoom", out var zoomElement))
         {
-            CenterLatitude = Convert.ToDouble(data["centerLat"]),
-            CenterLongitude = Convert.ToDouble(data["centerLng"]),
-            ZoomLevel = Convert.ToInt32(data["zoom"]),
-            MinLatitude = Convert.ToDouble(data["minLat"]),
-            MinLongitude = Convert.ToDouble(data["minLng"]),
-            MaxLatitude = Convert.ToDouble(data["maxLat"]),
-            MaxLongitude = Convert.ToDouble(data["maxLng"])
-        };
+            var args = new MapViewChangedEventArgs
+            {
+                CenterLatitude = centerLatElement.GetDouble(),
+                CenterLongitude = centerLngElement.GetDouble(),
+                ZoomLevel = zoomElement.GetInt32(),
+                MinLatitude = data.TryGetProperty("minLat", out var minLatElement) ? minLatElement.GetDouble() : 0,
+                MinLongitude = data.TryGetProperty("minLng", out var minLngElement) ? minLngElement.GetDouble() : 0,
+                MaxLatitude = data.TryGetProperty("maxLat", out var maxLatElement) ? maxLatElement.GetDouble() : 0,
+                MaxLongitude = data.TryGetProperty("maxLng", out var maxLngElement) ? maxLngElement.GetDouble() : 0
+            };
 
-        MapViewChanged?.Invoke(this, args);
+            MapViewChanged?.Invoke(this, args);
+        }
     }
 
     private string GenerateOpenStreetMapHTML()
@@ -489,6 +567,7 @@ public class RealMappingService : IRealMappingService
 
         var markers = {{}};
         var overlays = {{}};
+        var releaseMarker = null; // Track the current release point marker
 
         function setMapView(lat, lng, zoom) {{
             map.setView([lat, lng], zoom);
@@ -499,6 +578,25 @@ public class RealMappingService : IRealMappingService
                 .addTo(map)
                 .bindPopup(data.title);
             markers[data.id] = marker;
+        }}
+
+        function addReleaseMarker(lat, lng, title) {{
+            // Remove existing release marker
+            if (releaseMarker) {{
+                map.removeLayer(releaseMarker);
+            }}
+            
+            // Add new release marker with distinctive red marker
+            releaseMarker = L.marker([lat, lng]).addTo(map).bindPopup(title || 'Chemical Release Point');
+            console.log('Added release marker at:', lat, lng);
+        }}
+
+        function clearReleaseMarkers() {{
+            if (releaseMarker) {{
+                map.removeLayer(releaseMarker);
+                releaseMarker = null;
+                console.log('Cleared release marker');
+            }}
         }}
 
         function addDispersionPlume(id, contourData) {{
@@ -534,14 +632,47 @@ public class RealMappingService : IRealMappingService
 
         // Event handlers
         map.on('click', function(e) {{
-            window.chrome.webview.postMessage({{
-                type: 'mapClick',
-                lat: e.latlng.lat,
-                lng: e.latlng.lng,
-                x: e.containerPoint.x,
-                y: e.containerPoint.y
-            }});
+            console.log('=== JavaScript map click detected! ===');
+            console.log('Coordinates:', e.latlng.lat, e.latlng.lng);
+            console.log('Container point:', e.containerPoint.x, e.containerPoint.y);
+            
+            // Immediately add/update the release marker
+            addReleaseMarker(e.latlng.lat, e.latlng.lng, 'Chemical Release Point');
+            
+            // Check if postMessage is available
+            if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {{
+                console.log('=== Sending postMessage to C# ===');
+                window.chrome.webview.postMessage({{
+                    type: 'mapClick',
+                    lat: e.latlng.lat,
+                    lng: e.latlng.lng,
+                    x: e.containerPoint.x,
+                    y: e.containerPoint.y
+                }});
+                console.log('=== PostMessage sent successfully ===');
+            }} else {{
+                console.error('=== window.chrome.webview.postMessage not available! ===');
+                console.log('window.chrome:', window.chrome);
+                console.log('window.chrome.webview:', window.chrome ? window.chrome.webview : 'undefined');
+            }}
         }});
+
+        // Test if WebView2 communication is ready
+        console.log('=== JavaScript loaded and ready ===');
+        console.log('window.chrome available:', !!window.chrome);
+        console.log('window.chrome.webview available:', !!(window.chrome && window.chrome.webview));
+        console.log('postMessage available:', !!(window.chrome && window.chrome.webview && window.chrome.webview.postMessage));
+        
+        // Send a test message immediately after load
+        setTimeout(function() {{
+            if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {{
+                console.log('=== Sending test message after 1 second ===');
+                window.chrome.webview.postMessage({{
+                    type: 'test',
+                    message: 'JavaScript communication test'
+                }});
+            }}
+        }}, 1000);
 
         map.on('moveend zoomend', function(e) {{
             var bounds = map.getBounds();

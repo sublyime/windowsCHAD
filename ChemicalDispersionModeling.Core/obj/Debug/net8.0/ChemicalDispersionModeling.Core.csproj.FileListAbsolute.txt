@@ -23,3 +23,4 @@ C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Core\obj\Debug\net8
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Core\obj\Debug\net8.0\refint\ChemicalDispersionModeling.Core.dll
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Core\obj\Debug\net8.0\ChemicalDispersionModeling.Core.pdb
 C:\vscode\windowschad\windowsCHAD\ChemicalDispersionModeling.Core\obj\Debug\net8.0\ref\ChemicalDispersionModeling.Core.dll
+C:\vscode\New folder\ChemicalDispersionModeling.Core\obj\Debug\net8.0\ChemicalDispersionModeling.Core.sourcelink.json
