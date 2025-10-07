@@ -49,6 +49,7 @@ public partial class MainWindow : Window
         IDispersionModelingService dispersionService,
         ILogger<MainWindow> logger) : this()
     {
+        Console.WriteLine("=== MainWindow Constructor Called ===");
         _liveWeatherService = liveWeatherService;
         _gasSensorService = gasSensorService;
         _realMappingService = realMappingService;
@@ -97,17 +98,20 @@ public partial class MainWindow : Window
     {
         try
         {
+            Console.WriteLine("=== MainWindow_Loaded Started ===");
             _logger?.LogInformation("MainWindow_Loaded started");
             _viewModel = DataContext as MainViewModel;
             
             if (_viewModel == null)
             {
+                Console.WriteLine("=== ERROR: DataContext is null or not MainViewModel ===");
                 _logger?.LogError("DataContext is null or not MainViewModel");
                 MessageBox.Show("DataContext not set properly. The application may not function correctly.", 
                     "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
+            Console.WriteLine("=== MainViewModel successfully bound ===");
             _logger?.LogInformation("MainViewModel successfully bound");
             
             // Only initialize services if they're available (dependency injection was used)
@@ -150,35 +154,47 @@ public partial class MainWindow : Window
     {
         try
         {
+            Console.WriteLine("=== Initializing real mapping service ===");
             _logger?.LogInformation("Initializing real mapping service");
 
             // Find the WebView2 in the XAML (we'll need to add it)
             _mapWebView = FindName("MapWebView") as WebView2;
+            Console.WriteLine($"=== WebView2 from XAML: {_mapWebView != null} ===");
             
             if (_mapWebView == null)
             {
+                Console.WriteLine("=== Creating WebView2 programmatically ===");
                 // Create WebView2 programmatically if not found in XAML
                 _mapWebView = new WebView2();
                 
                 // Find the map container and add WebView2
                 var mapContainer = FindName("MapContainer") as Border;
+                Console.WriteLine($"=== MapContainer found: {mapContainer != null} ===");
                 if (mapContainer != null)
                 {
                     mapContainer.Child = _mapWebView;
+                    Console.WriteLine("=== WebView2 added to MapContainer ===");
                 }
             }
 
+            Console.WriteLine($"=== WebView2 ready: {_mapWebView != null} ===");
+            Console.WriteLine($"=== RealMappingService type: {_realMappingService?.GetType().Name} ===");
             if (_mapWebView != null && _realMappingService is RealMappingService realMapping)
             {
+                Console.WriteLine("=== Calling SetWebView ===");
                 realMapping.SetWebView(_mapWebView);
+                Console.WriteLine("=== Calling InitializeAsync ===");
                 await realMapping.InitializeAsync(MapProvider.OpenStreetMap);
+                Console.WriteLine("=== InitializeAsync completed ===");
                 
                 // Set default view to Houston, TX area
                 await realMapping.SetMapViewAsync(29.7604, -95.3698, 10);
                 
                 // Subscribe to map events
+                Console.WriteLine($"Subscribing to map events...");
                 realMapping.MapClicked += OnMapClicked;
                 realMapping.MapViewChanged += OnMapViewChanged;
+                Console.WriteLine($"Map events subscribed successfully");
                 
                 _logger?.LogInformation("Real mapping service initialized successfully");
             }
@@ -259,19 +275,62 @@ public partial class MainWindow : Window
     {
         try
         {
+            _logger?.LogInformation($"=== MAP CLICK EVENT RECEIVED ====");
+            _logger?.LogInformation($"Coordinates: Lat={e.Latitude:F6}, Lng={e.Longitude:F6}");
+            _logger?.LogInformation($"Screen coordinates: X={e.ScreenX}, Y={e.ScreenY}");
+            _logger?.LogInformation($"Sender: {sender?.GetType().Name}");
+            _logger?.LogInformation($"ViewModel available: {_viewModel != null}");
+            
+            // Update the ViewModel with the new coordinates
             Dispatcher.Invoke(() =>
             {
                 if (_viewModel != null)
                 {
+                    _logger?.LogInformation($"BEFORE UPDATE - Current location: Lat={_viewModel.ReleaseLatitude:F6}, Lng={_viewModel.ReleaseLongitude:F6}");
                     _viewModel.ReleaseLatitude = e.Latitude;
                     _viewModel.ReleaseLongitude = e.Longitude;
-                    _viewModel.StatusMessage = $"Release location set to {e.Latitude:F6}, {e.Longitude:F6}";
+                    _viewModel.StatusMessage = $"Setting release location to {e.Latitude:F6}, {e.Longitude:F6}...";
+                    _viewModel.DebugStatus = $"Debug: Map clicked at {e.Latitude:F6}, {e.Longitude:F6}";
+                    _logger?.LogInformation($"AFTER UPDATE - New location: Lat={_viewModel.ReleaseLatitude:F6}, Lng={_viewModel.ReleaseLongitude:F6}");
+                    _logger?.LogInformation($"Status message set: {_viewModel.StatusMessage}");
+                }
+                else
+                {
+                    _logger?.LogError("ViewModel is null - cannot update coordinates!");
                 }
             });
+
+            // Clear any existing release markers first
+            _logger?.LogInformation($"=== CLEARING EXISTING MARKERS ====");
+            if (_realMappingService != null)
+            {
+                _logger?.LogInformation($"Calling ClearReleaseMarkersAsync");
+                await _realMappingService.ClearReleaseMarkersAsync();
+                _logger?.LogInformation($"Markers cleared successfully");
+            }
+            else
+            {
+                _logger?.LogError("RealMappingService is null - cannot clear markers!");
+            }
+            
+            // Fetch weather data for the new location
+            _logger?.LogInformation($"=== STARTING WEATHER UPDATE ====");
+            if (_viewModel != null)
+            {
+                _logger?.LogInformation($"Calling UpdateWeatherForLocationAsync with Lat={e.Latitude:F6}, Lng={e.Longitude:F6}");
+                await _viewModel.UpdateWeatherForLocationAsync(e.Latitude, e.Longitude);
+                _logger?.LogInformation($"Weather update completed");
+            }
+            else
+            {
+                _logger?.LogError("ViewModel is null - cannot update weather!");
+            }
             
             // Add a release source marker at the clicked location
+            _logger?.LogInformation($"=== ADDING NEW RELEASE MARKER ====");
             if (_realMappingService != null && _viewModel != null)
             {
+                _logger?.LogInformation($"Creating release object for marker");
                 var release = new Release
                 {
                     Name = "Release Point",
@@ -291,22 +350,37 @@ public partial class MainWindow : Window
                     Scenario = _viewModel.ReleaseScenario
                 };
                 
+                _logger?.LogInformation($"Calling AddReleaseSourceAsync with release at {release.Latitude:F6}, {release.Longitude:F6}");
                 await _realMappingService.AddReleaseSourceAsync(release);
+                _logger?.LogInformation($"Release marker added successfully");
                 
                 Dispatcher.Invoke(() =>
                 {
                     if (_viewModel != null)
                     {
-                        _viewModel.StatusMessage = $"Release marker added at {e.Latitude:F6}, {e.Longitude:F6}";
+                        var weather = _viewModel.CurrentWeather;
+                        var weatherInfo = weather != null 
+                            ? $" | Weather: {weather.Temperature:F1}°C, Wind {weather.WindSpeed:F1} m/s"
+                            : " | Loading weather...";
+                        _viewModel.StatusMessage = $"Release location set: {e.Latitude:F6}, {e.Longitude:F6}{weatherInfo}";
+                        _logger?.LogInformation($"Final status message: {_viewModel.StatusMessage}");
+                        _logger?.LogInformation($"Weather data available: {weather != null}");
                     }
                 });
             }
             
-            _logger?.LogInformation($"Map clicked: {e.Latitude:F6}, {e.Longitude:F6}");
+            _logger?.LogInformation($"Map clicked: {e.Latitude:F6}, {e.Longitude:F6}, weather updated, marker placed");
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error processing map click");
+            Dispatcher.Invoke(() =>
+            {
+                if (_viewModel != null)
+                {
+                    _viewModel.StatusMessage = $"Error updating location: {ex.Message}";
+                }
+            });
         }
     }
 
@@ -319,6 +393,40 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error processing map view change");
+        }
+    }
+
+    private void TestLocationUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Console.WriteLine($"=== TEST LOCATION UPDATE CLICKED ===");
+            
+            // Test coordinates (New York City)
+            double testLat = 40.7128;
+            double testLng = -74.0060;
+            
+            Console.WriteLine($"Simulating map click at NYC: {testLat:F6}, {testLng:F6}");
+            
+            // Create a simulated map click event
+            var testArgs = new MapClickEventArgs
+            {
+                Latitude = testLat,
+                Longitude = testLng,
+                ScreenX = 100,
+                ScreenY = 100,
+                IsRightClick = false
+            };
+            
+            // Call the map click handler directly
+            OnMapClicked(this, testArgs);
+            
+            Console.WriteLine($"Test location update completed");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in test location update: {ex.Message}");
+            _logger?.LogError(ex, "Error in test location update");
         }
     }
 

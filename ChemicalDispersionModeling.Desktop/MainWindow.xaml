@@ -208,7 +208,30 @@
                         </GroupBox>
                         
                         <!-- Weather Information -->
-                        <GroupBox Header="Current Weather" Margin="0,0,0,10">
+                        <GroupBox Margin="0,0,0,10">
+                            <GroupBox.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Current Weather" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding WeatherStatus}" Margin="10,0,0,0" 
+                                              FontSize="10" VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding WeatherStatus}" Value="Online">
+                                                        <Setter Property="Foreground" Value="Green"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding WeatherStatus}" Value="Updating">
+                                                        <Setter Property="Foreground" Value="Orange"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding WeatherStatus}" Value="Error">
+                                                        <Setter Property="Foreground" Value="Red"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </GroupBox.Header>
                             <Grid Margin="5">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -223,18 +246,37 @@
                                 </Grid.ColumnDefinitions>
                                 
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Wind Speed:" VerticalAlignment="Center" Margin="0,2"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CurrentWeather.WindSpeed, StringFormat=F1}" Margin="5,2"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Margin="5,2">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{}{0:F1} m/s">
+                                            <Binding Path="CurrentWeather.WindSpeed"/>
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
                                 
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Wind Direction:" VerticalAlignment="Center" Margin="0,2"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding CurrentWeather.WindDirection, StringFormat=F0}" Margin="5,2"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Margin="5,2">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{}{0:F0}°">
+                                            <Binding Path="CurrentWeather.WindDirection"/>
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
                                 
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Temperature:" VerticalAlignment="Center" Margin="0,2"/>
-                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding CurrentWeather.Temperature, StringFormat=F1}" Margin="5,2"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Margin="5,2">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{}{0:F1}°C">
+                                            <Binding Path="CurrentWeather.Temperature"/>
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
                                 
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Stability Class:" VerticalAlignment="Center" Margin="0,2"/>
                                 <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CurrentWeather.StabilityClass}" Margin="5,2"/>
                                 
-                                <Button Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Content="🔄 Refresh Weather" Command="{Binding RefreshWeatherCommand}" Margin="0,5"/>
+                                <Button Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Content="🔄 Refresh Weather" Command="{Binding RefreshWeatherCommand}" Margin="0,2,0,2"/>
+                                <Button Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="🧪 Test Location Update" Click="TestLocationUpdate_Click" Margin="0,2,0,2" Background="LightYellow"/>
                             </Grid>
                         </GroupBox>
                     </StackPanel>
@@ -377,6 +419,9 @@
         <StatusBar Grid.Row="3" Background="#F0F0F0">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}" Margin="5,0"/>
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock Text="{Binding DebugStatus}" Margin="10,0" Foreground="Blue" FontWeight="Bold"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
                 <StackPanel Orientation="Horizontal">

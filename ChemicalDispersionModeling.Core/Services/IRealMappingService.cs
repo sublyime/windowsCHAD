@@ -28,6 +28,11 @@ public interface IRealMappingService
     Task ClearDispersionOverlaysAsync();
     
     /// <summary>
+    /// Clear all release markers
+    /// </summary>
+    Task ClearReleaseMarkersAsync();
+    
+    /// <summary>
     /// Add weather station markers
     /// </summary>
     Task AddWeatherStationAsync(WeatherStation station);

@@ -81,6 +81,9 @@ public partial class MainViewModel : ObservableObject
     private string _statusMessage = "Ready";
 
     [ObservableProperty]
+    private string _debugStatus = "Debug: Ready";
+
+    [ObservableProperty]
     private string _databaseStatus = "Connected";
 
     [ObservableProperty]
@@ -714,23 +717,58 @@ Technology Stack:
 
     private async Task RefreshWeatherAsync()
     {
+        await UpdateWeatherForLocationAsync(ReleaseLatitude, ReleaseLongitude);
+    }
+
+    /// <summary>
+    /// Updates weather data for a specific location
+    /// </summary>
+    public async Task UpdateWeatherForLocationAsync(double latitude, double longitude)
+    {
         try
         {
-            StatusMessage = "Refreshing weather data...";
+            Console.WriteLine($"=== UpdateWeatherForLocationAsync CALLED ===");
+            Console.WriteLine($"Input coordinates: Lat={latitude:F6}, Lng={longitude:F6}");
+            Console.WriteLine($"Weather service available: {_weatherService != null}");
+            
+            StatusMessage = $"Fetching weather for location {latitude:F4}°, {longitude:F4}°...";
             WeatherStatus = "Updating";
+            Console.WriteLine($"Status updated to: {StatusMessage}");
 
-            var weather = await _weatherService.GetCurrentWeatherAsync(ReleaseLatitude, ReleaseLongitude);
-            if (weather != null)
+            Console.WriteLine($"Calling weather service...");
+            if (_weatherService != null)
             {
-                CurrentWeather = weather;
-                LastUpdateTime = DateTime.Now;
-                WeatherStatus = "Online";
-                StatusMessage = "Weather data updated";
+                var weather = await _weatherService.GetCurrentWeatherAsync(latitude, longitude);
+                Console.WriteLine($"Weather service returned: {weather != null}");
+                
+                if (weather != null)
+                {
+                    Console.WriteLine($"Weather data: Temp={weather.Temperature:F1}°C, Wind={weather.WindSpeed:F1}m/s, Dir={weather.WindDirection:F0}°");
+                    CurrentWeather = weather;
+                    
+                    // Update individual weather properties for UI binding
+                    Temperature = weather.Temperature;
+                    WindSpeed = weather.WindSpeed;
+                    WindDirection = weather.WindDirection;
+                    StabilityClass = weather.StabilityClass ?? "D"; // Default to neutral if null
+                    
+                    LastUpdateTime = DateTime.Now;
+                    WeatherStatus = "Online";
+                    StatusMessage = $"Weather updated: {weather.Temperature:F1}°C, Wind {weather.WindSpeed:F1} m/s from {weather.WindDirection:F0}°";
+                    Console.WriteLine($"Weather update completed successfully");
+                }
+                else
+                {
+                    WeatherStatus = "Error";
+                    StatusMessage = "Failed to retrieve weather data";
+                    Console.WriteLine($"Weather service returned null data");
+                }
             }
             else
             {
                 WeatherStatus = "Error";
-                StatusMessage = "Failed to retrieve weather data";
+                StatusMessage = "Weather service not available";
+                Console.WriteLine($"Weather service is null!");
             }
         }
         catch (Exception ex)
