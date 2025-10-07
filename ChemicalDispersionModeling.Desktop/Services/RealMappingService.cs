@@ -31,6 +31,17 @@ public class RealMappingService : IRealMappingService
         _webView = webView;
         _webView.NavigationCompleted += OnNavigationCompleted;
         _webView.CoreWebView2InitializationCompleted += OnCoreWebView2InitializationCompleted;
+        
+        Console.WriteLine("=== SetWebView called ===");
+        Console.WriteLine($"CoreWebView2 already initialized: {_webView.CoreWebView2 != null}");
+        
+        // If CoreWebView2 is already initialized, manually attach the handler
+        if (_webView.CoreWebView2 != null)
+        {
+            Console.WriteLine("=== CoreWebView2 already ready, attaching handler manually ===");
+            _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+            Console.WriteLine("=== C# WebMessageReceived handler attached manually! ===");
+        }
     }
 
     public async Task<bool> InitializeAsync(MapProvider provider, string apiKey = "")
@@ -47,8 +58,21 @@ public class RealMappingService : IRealMappingService
             _apiKey = apiKey;
 
             _logger.LogInformation($"Initializing real mapping service with {provider}");
+            Console.WriteLine($"=== InitializeAsync called ===");
+            Console.WriteLine($"CoreWebView2 before EnsureCoreWebView2Async: {_webView.CoreWebView2 != null}");
 
             await _webView.EnsureCoreWebView2Async();
+            Console.WriteLine($"CoreWebView2 after EnsureCoreWebView2Async: {_webView.CoreWebView2 != null}");
+            
+            // Double-check that the handler is attached after initialization
+            if (_webView.CoreWebView2 != null)
+            {
+                Console.WriteLine("=== Double-checking WebMessageReceived handler after EnsureCoreWebView2Async ===");
+                // Remove any existing handler first to avoid duplicates
+                _webView.CoreWebView2.WebMessageReceived -= OnWebMessageReceived;
+                _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                Console.WriteLine("=== C# WebMessageReceived handler attached/re-attached! ===");
+            }
 
             var htmlContent = provider switch
             {
@@ -136,6 +160,23 @@ public class RealMappingService : IRealMappingService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error clearing dispersion overlays");
+        }
+    }
+
+    public async Task ClearReleaseMarkersAsync()
+    {
+        try
+        {
+            if (_webView?.CoreWebView2 == null) return;
+
+            var script = "clearReleaseMarkers();";
+            await _webView.CoreWebView2.ExecuteScriptAsync(script);
+            
+            _logger.LogInformation("Cleared all release markers");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error clearing release markers");
         }
     }
 
@@ -346,27 +387,33 @@ public class RealMappingService : IRealMappingService
         {
             // Add JavaScript bridge for map events
             _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+            Console.WriteLine("=== C# WebMessageReceived handler attached! ===");
             
             _logger.LogInformation("WebView2 initialization completed successfully");
         }
         else
         {
+            Console.WriteLine($"=== WebView2 initialization failed: {e.InitializationException?.Message} ===");
             _logger.LogError($"WebView2 initialization failed: {e.InitializationException?.Message}");
         }
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
     {
+        Console.WriteLine("=== C# WebMessage Received! ===");
         try
         {
             var message = e.TryGetWebMessageAsString();
+            Console.WriteLine($"Message: {message}");
             var data = JsonSerializer.Deserialize<Dictionary<string, object>>(message);
             
             if (data?.ContainsKey("type") == true)
             {
+                Console.WriteLine($"Message type: {data["type"]}");
                 switch (data["type"].ToString())
                 {
                     case "mapClick":
+                        Console.WriteLine("Calling HandleMapClick");
                         HandleMapClick(data);
                         break;
                     case "mapViewChanged":
@@ -377,6 +424,7 @@ public class RealMappingService : IRealMappingService
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"Error: {ex.Message}");
             _logger.LogError(ex, "Error processing web message");
         }
     }

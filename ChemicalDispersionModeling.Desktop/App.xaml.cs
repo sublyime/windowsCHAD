@@ -23,6 +23,7 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        Console.WriteLine("=== Application OnStartup ===");
         // Create host builder
         var hostBuilder = Host.CreateDefaultBuilder()
             .ConfigureAppConfiguration((context, config) =>
