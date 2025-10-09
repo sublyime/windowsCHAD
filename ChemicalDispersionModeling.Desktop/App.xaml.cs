@@ -20,6 +20,7 @@ namespace ChemicalDispersionModeling.Desktop;
 public partial class App : Application
 {
     private IHost? _host;
+    public static IServiceProvider ServiceProvider { get; private set; } = default!;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -63,6 +64,9 @@ public partial class App : Application
             Console.WriteLine("Starting host...");
             await _host.StartAsync();
             Console.WriteLine("Host started successfully.");
+            
+            // Set the static ServiceProvider
+            ServiceProvider = _host.Services;
             
             // Create and show main window
             Console.WriteLine("Getting MainWindow service...");
@@ -116,7 +120,7 @@ public partial class App : Application
         services.AddScoped<IRealMappingService, Desktop.Services.RealMappingService>();
 
         // Dispersion Service
-        services.AddScoped<IDispersionModelingService, DispersionModelingService>();
+        services.AddScoped<IDispersionModelingService, Desktop.Services.DispersionModelingService>();
 
         // HTTP Client for weather services
         services.AddHttpClient<ILiveWeatherService, Core.Services.Implementation.LiveWeatherService>();

@@ -23,6 +23,11 @@ public interface IRealMappingService
     Task AddDispersionPlumeAsync(DispersionResult result, DispersionVisualizationOptions options);
     
     /// <summary>
+    /// Add dispersion grid visualization to map with multiple data points
+    /// </summary>
+    Task AddDispersionGridAsync(IEnumerable<DispersionResult> gridResults, DispersionVisualizationOptions options);
+    
+    /// <summary>
     /// Clear all dispersion overlays
     /// </summary>
     Task ClearDispersionOverlaysAsync();

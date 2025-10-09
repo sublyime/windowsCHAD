@@ -16,6 +16,9 @@ public partial class MainViewModel : ObservableObject
     private readonly IDispersionModelingService _dispersionService;
     private readonly ITerrainService _terrainService;
 
+    // Events
+    public event EventHandler<DispersionModelCompletedEventArgs>? DispersionModelCompleted;
+
     // Observable properties
     [ObservableProperty]
     private double _releaseLatitude = 40.7128; // Default to NYC
@@ -29,10 +32,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private Chemical? _selectedChemical;
 
-    [ObservableProperty]
+    // Release type and scenario - manually implemented for change handling
     private string _releaseType = "Instantaneous";
-
-    [ObservableProperty]
     private string _releaseScenario = "Gas";
 
     [ObservableProperty]
@@ -43,6 +44,25 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private double _totalMass = 100.0;
+
+    // ALOHA-Specific Modeling Parameters
+    [ObservableProperty]
+    private string _terrainType = "Urban"; // Urban, Rural
+
+    [ObservableProperty]
+    private double _roughnessLength = 1.0; // Surface roughness in meters
+
+    [ObservableProperty]
+    private double _inversionHeight = 400.0; // Inversion height in meters
+
+    [ObservableProperty]
+    private double _mixingHeight = 1000.0; // Mixing layer height in meters
+
+    [ObservableProperty]
+    private string _stabilityMethod = "Manual"; // Manual, Solar Insolation, Temperature Gradient
+
+    [ObservableProperty]
+    private bool _useEnhancedDispersion = true; // Enhanced dispersion for heavy gases
 
     [ObservableProperty]
     private WeatherData? _currentWeather;
@@ -256,6 +276,68 @@ public partial class MainViewModel : ObservableObject
             StabilityClass = "D",
             Timestamp = DateTime.Now
         };
+    }
+
+    // Override property setters to handle parameter changes
+    public string ReleaseType
+    {
+        get => _releaseType;
+        set
+        {
+            if (SetProperty(ref _releaseType, value))
+            {
+                UpdateParametersForModelType();
+            }
+        }
+    }
+
+    public string ReleaseScenario
+    {
+        get => _releaseScenario;
+        set
+        {
+            if (SetProperty(ref _releaseScenario, value))
+            {
+                UpdateParametersForModelType();
+            }
+        }
+    }
+
+    private void UpdateParametersForModelType()
+    {
+        // Update parameters based on release type and scenario combination
+        if (ReleaseType == "Variable" && ReleaseScenario == "Explosion")
+        {
+            // Explosion parameters
+            ReleaseRate = 50.0; // Higher rate for explosions
+            ReleaseDuration = 5.0; // Short duration
+            TotalMass = 250.0; // More material
+            ReleaseHeight = 10.0; // Higher release point
+            TerrainType = "Urban"; // Explosions typically in urban areas
+            UseEnhancedDispersion = true;
+        }
+        else if (ReleaseType == "Continuous" && ReleaseScenario == "Gas")
+        {
+            // Continuous gas leak
+            ReleaseRate = 5.0; // Steady leak rate
+            ReleaseDuration = 300.0; // 5 minutes
+            TotalMass = 1500.0; // Total over time
+            ReleaseHeight = 3.0; // Pipe level
+            TerrainType = "Urban";
+            UseEnhancedDispersion = false;
+        }
+        else if (ReleaseType == "Instantaneous")
+        {
+            // Instantaneous release
+            ReleaseRate = 1.0; // Not applicable for instantaneous
+            ReleaseDuration = 60.0; // Default
+            TotalMass = 100.0; // Fixed amount
+            ReleaseHeight = 2.0; // Ground level
+            TerrainType = "Urban";
+            UseEnhancedDispersion = false;
+        }
+        
+        StatusMessage = $"Parameters updated for {ReleaseType} {ReleaseScenario} release";
     }
 
     private void AddSampleReceptors()
@@ -522,7 +604,17 @@ Current Weather Status: " + WeatherStatus;
             StatusMessage = "Running dispersion model...";
             ModelStatus = "Running";
 
-            // Create release object
+            // Debug weather data
+            if (CurrentWeather != null)
+            {
+                StatusMessage = $"Using weather: {CurrentWeather.Temperature:F1}°C, Wind {CurrentWeather.WindSpeed:F1} m/s @ {CurrentWeather.WindDirection:F0}°, Stability {CurrentWeather.StabilityClass ?? "D"}";
+            }
+            else
+            {
+                StatusMessage = "Warning: No weather data available, using defaults";
+            }
+
+            // Create release object with ALOHA-compliant parameters
             var release = new Release
             {
                 Name = "Current Release",
@@ -536,15 +628,32 @@ Current Weather Status: " + WeatherStatus;
                 StartTime = DateTime.Now,
                 ChemicalId = SelectedChemical.Id,
                 Chemical = SelectedChemical,
-                ModelingWindSpeed = CurrentWeather.WindSpeed,
-                ModelingWindDirection = CurrentWeather.WindDirection,
-                ModelingStabilityClass = CurrentWeather.StabilityClass ?? "D",
-                ModelingTemperature = CurrentWeather.Temperature,
-                ModelingHumidity = CurrentWeather.Humidity
+                ModelingWindSpeed = CurrentWeather?.WindSpeed ?? 2.0,
+                ModelingWindDirection = CurrentWeather?.WindDirection ?? 270.0,
+                ModelingStabilityClass = CurrentWeather?.StabilityClass ?? "D",
+                ModelingTemperature = CurrentWeather?.Temperature ?? 20.0,
+                ModelingHumidity = CurrentWeather?.Humidity ?? 50.0,
+                DiameterOrArea = 5.0, // Default release area/diameter
+                InitialTemperature = (CurrentWeather?.Temperature ?? 20.0) + 10, // Slightly warmer than ambient
+                InitialPressure = 101325.0 // Standard atmospheric pressure
             };
 
-            // Run dispersion calculations
-            var results = await _dispersionService.CalculateGaussianPlumeAsync(release, Receptors, CurrentWeather);
+            // Run dispersion calculations using grid-based method
+            var weatherData = CurrentWeather ?? new WeatherData
+            {
+                Temperature = 20.0,
+                WindSpeed = 2.0,
+                WindDirection = 270.0,
+                StabilityClass = "D",
+                Humidity = 50.0
+            };
+            
+            var results = await _dispersionService.CalculateDispersionGridAsync(
+                release, 
+                weatherData,
+                gridSize: 50,    // 50m grid resolution for more detail
+                maxDistance: 2000 // 2km maximum distance
+            );
             
             // Update results
             DispersionResults.Clear();
@@ -558,6 +667,14 @@ Current Weather Status: " + WeatherStatus;
 
             StatusMessage = $"Model completed. {DispersionResults.Count} results calculated.";
             ModelStatus = "Completed";
+
+            // Fire event for map visualization
+            DispersionModelCompleted?.Invoke(this, new DispersionModelCompletedEventArgs
+            {
+                Results = DispersionResults,
+                Release = release,
+                Weather = weatherData
+            });
         }
         catch (Exception ex)
         {
@@ -916,4 +1033,14 @@ Technology Stack:
         };
         timer.Start();
     }
+}
+
+/// <summary>
+/// Event arguments for dispersion model completion
+/// </summary>
+public class DispersionModelCompletedEventArgs : EventArgs
+{
+    public IEnumerable<DispersionResult> Results { get; set; } = new List<DispersionResult>();
+    public Release Release { get; set; } = new Release();
+    public WeatherData Weather { get; set; } = new WeatherData();
 }

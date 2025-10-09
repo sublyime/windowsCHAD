@@ -142,6 +142,58 @@ public class RealMappingService : IRealMappingService
         }
     }
 
+    public async Task AddDispersionGridAsync(IEnumerable<DispersionResult> gridResults, DispersionVisualizationOptions options)
+    {
+        try
+        {
+            if (_webView?.CoreWebView2 == null) 
+            {
+                _logger.LogError("WebView2 CoreWebView2 is null - cannot add dispersion grid");
+                return;
+            }
+
+            // Clear existing overlays
+            await ClearDispersionOverlaysAsync();
+
+            var gridResultsList = gridResults.ToList();
+            _logger.LogInformation($"Adding dispersion grid with {gridResultsList.Count} results");
+
+            // Convert grid results to format expected by JavaScript
+            var gridData = gridResultsList.Select(r => new
+            {
+                latitude = r.Latitude,
+                longitude = r.Longitude,
+                concentration = r.Concentration
+            }).ToArray();
+
+            _logger.LogInformation($"Grid data sample: First point at {gridData.FirstOrDefault()?.latitude}, {gridData.FirstOrDefault()?.longitude} with concentration {gridData.FirstOrDefault()?.concentration}");
+
+            var contourData = new
+            {
+                gridData = gridData,
+                contourLevels = options.ConcentrationLevels.ToArray(),
+                colors = options.ContourColors.ToArray(),
+                opacity = options.Opacity,
+                unit = "mg/m³"
+            };
+
+            var overlayId = Guid.NewGuid().ToString();
+            var jsonData = JsonSerializer.Serialize(contourData);
+            _logger.LogInformation($"Sending to JavaScript: addDispersionPlume('{overlayId}', {jsonData.Substring(0, Math.Min(200, jsonData.Length))}...)");
+            
+            var script = $"addDispersionPlume('{overlayId}', {jsonData});";
+            await _webView.CoreWebView2.ExecuteScriptAsync(script);
+
+            _dispersionOverlays.Add(overlayId);
+            
+            _logger.LogInformation($"Added dispersion grid overlay with {gridData.Length} points: {overlayId}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding dispersion grid");
+        }
+    }
+
     public async Task ClearDispersionOverlaysAsync()
     {
         try
@@ -493,8 +545,8 @@ public class RealMappingService : IRealMappingService
 
     private void HandleMapClick(JsonElement data)
     {
-        if (data.TryGetProperty("lat", out var latElement) && 
-            data.TryGetProperty("lng", out var lngElement))
+        if (data.TryGetProperty("latitude", out var latElement) && 
+            data.TryGetProperty("longitude", out var lngElement))
         {
             var latitude = latElement.GetDouble();
             var longitude = lngElement.GetDouble();
@@ -503,8 +555,8 @@ public class RealMappingService : IRealMappingService
             {
                 Latitude = latitude,
                 Longitude = longitude,
-                ScreenX = data.TryGetProperty("x", out var xElement) ? xElement.GetDouble() : 0,
-                ScreenY = data.TryGetProperty("y", out var yElement) ? yElement.GetDouble() : 0,
+                ScreenX = data.TryGetProperty("screenX", out var xElement) ? xElement.GetDouble() : 0,
+                ScreenY = data.TryGetProperty("screenY", out var yElement) ? yElement.GetDouble() : 0,
                 IsRightClick = data.TryGetProperty("rightClick", out var rightClickElement) && rightClickElement.GetBoolean()
             };
 
@@ -513,9 +565,13 @@ public class RealMappingService : IRealMappingService
             
             MapClicked?.Invoke(this, args);
             
-            // Show success message
-            System.Windows.MessageBox.Show($"Map Click Processed!\nLat: {args.Latitude:F6}\nLng: {args.Longitude:F6}\nRelease marker updated!", 
-                "Map Click Success", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            // Show success message for debugging
+            Console.WriteLine($"Map Click Processed!\nLat: {args.Latitude:F6}\nLng: {args.Longitude:F6}\nEvent triggered!");
+        }
+        else
+        {
+            Console.WriteLine("ERROR: Could not find latitude/longitude properties in map click data");
+            _logger.LogError("Map click data missing required latitude/longitude properties");
         }
     }
 
@@ -765,9 +821,10 @@ public class RealMappingService : IRealMappingService
         var coordinates = new List<List<double[]>>();
         
         // Create sample contour for demonstration
-        var centerLat = result.Release?.Latitude ?? _currentLatitude;
-        var centerLng = result.Release?.Longitude ?? _currentLongitude;
+        var centerLat = result.Latitude;
+        var centerLng = result.Longitude;
         
+        // Create a simple rectangular contour around the center point
         var contour = new List<double[]>
         {
             new[] { centerLat + 0.01, centerLng - 0.01 },

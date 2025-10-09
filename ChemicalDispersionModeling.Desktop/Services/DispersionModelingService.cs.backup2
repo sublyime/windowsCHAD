@@ -1,0 +1,359 @@
+using ChemicalDispersionModeling.Core.Models;
+using ChemicalDispersionModeling.Core.Services;
+using Microsoft.Extensions.Logging;
+
+namespace ChemicalDispersionModeling.Desktop.Services;
+
+/// <summary>
+/// Implementation of atmospheric dispersion modeling using Gaussian plume model
+/// </summary>
+public class DispersionModelingService : IDispersionModelingService
+{
+    private readonly ILogger<DispersionModelingService> _logger;
+
+    public DispersionModelingService(ILogger<DispersionModelingService> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<IEnumerable<DispersionResult>> CalculateGaussianPlumeAsync(Release release, IEnumerable<Receptor> receptors, WeatherData weather)
+    {
+        return await Task.Run(() =>
+        {
+        try
+        {
+            _logger.LogInformation($"Calculating Gaussian plume for release at {release.Latitude:F6}, {release.Longitude:F6}");
+            
+            var results = new List<DispersionResult>();
+            var effectiveReleaseRate = CalculateEffectiveReleaseRate(release, release.Chemical!, weather);
+            var plumeRise = CalculatePlumeRise(release, release.Chemical!, weather);
+            var effectiveHeight = release.ReleaseHeight + plumeRise;
+            
+            var stabilityClass = DetermineStabilityClass(weather);
+            
+            foreach (var receptor in receptors)
+            {
+                var distance = CalculateDistance(release.Latitude, release.Longitude, receptor.Latitude, receptor.Longitude);
+                
+                if (distance < 10) continue; // Skip receptors too close to avoid mathematical issues
+                
+                var concentration = CalculateGaussianConcentration(
+                    effectiveReleaseRate,
+                    distance,
+                    effectiveHeight,
+                    weather.WindSpeed,
+                    stabilityClass);
+                
+                var result = new DispersionResult
+                {
+                    Latitude = receptor.Latitude,
+                    Longitude = receptor.Longitude,
+                    Concentration = concentration,
+                    ConcentrationUnit = "mg/m³",
+                    CalculationTime = DateTime.Now,
+                    DistanceFromSource = distance,
+                    RiskLevel = DetermineRiskLevel(concentration, release.Chemical!),
+                    WindSpeed = weather.WindSpeed,
+                    WindDirection = weather.WindDirection,
+                    StabilityClass = stabilityClass,
+                    Temperature = weather.Temperature,
+                    ModelUsed = "Gaussian Plume",
+                    ReleaseId = release.Id,
+                    ReceptorId = receptor.Id
+                };
+                
+                results.Add(result);
+            }
+            
+            _logger.LogInformation($"Calculated concentrations for {results.Count} receptors");
+            return results;
+        });
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, "Error calculating Gaussian plume");
+        throw;
+    }
+    }
+
+    public async Task<IEnumerable<DispersionResult>> CalculateDispersionGridAsync(Release release, WeatherData weather, double gridSize = 100, double maxDistance = 10000)
+    {
+        try
+        {
+            _logger.LogInformation($"Calculating dispersion grid with {gridSize}m resolution, max distance {maxDistance}m");
+            
+            var results = new List<DispersionResult>();
+            var effectiveReleaseRate = CalculateEffectiveReleaseRate(release, release.Chemical!, weather);
+            var plumeRise = CalculatePlumeRise(release, release.Chemical!, weather);
+            var effectiveHeight = release.ReleaseHeight + plumeRise;
+            var stabilityClass = DetermineStabilityClass(weather);
+            
+            // Convert wind direction to radians for calculations
+            var windDirRad = weather.WindDirection * Math.PI / 180.0;
+            
+            // Create grid points - focus more points downwind
+            var gridPoints = GenerateGridPoints(release.Latitude, release.Longitude, gridSize, maxDistance, windDirRad);
+            
+            foreach (var point in gridPoints)
+            {
+                var distance = CalculateDistance(release.Latitude, release.Longitude, point.lat, point.lng);
+                
+                if (distance < 10) continue; // Skip points too close
+                
+                var concentration = CalculateGaussianConcentration(
+                    effectiveReleaseRate,
+                    distance,
+                    effectiveHeight,
+                    weather.WindSpeed,
+                    stabilityClass,
+                    point.crosswindDistance);
+                
+                // Only include points with significant concentration
+                if (concentration > 0.001) // 0.001 mg/m³ threshold
+                {
+                    var result = new DispersionResult
+                    {
+                        Latitude = point.lat,
+                        Longitude = point.lng,
+                        Concentration = concentration,
+                        ConcentrationUnit = "mg/m³",
+                        CalculationTime = DateTime.Now,
+                        DistanceFromSource = distance,
+                        RiskLevel = DetermineRiskLevel(concentration, release.Chemical!),
+                        WindSpeed = weather.WindSpeed,
+                        WindDirection = weather.WindDirection,
+                        StabilityClass = stabilityClass,
+                        Temperature = weather.Temperature,
+                        ModelUsed = "Gaussian Plume Grid",
+                        ReleaseId = release.Id
+                    };
+                    
+                    results.Add(result);
+                }
+            }
+            
+            _logger.LogInformation($"Generated {results.Count} grid points with significant concentrations");
+            return results;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error calculating dispersion grid");
+            throw;
+        }
+    }
+
+    public async Task<IEnumerable<DispersionResult>> CalculateTimeVaryingDispersionAsync(Release release, IEnumerable<Receptor> receptors, IEnumerable<WeatherData> weatherSequence)
+    {
+        var allResults = new List<DispersionResult>();
+        
+        foreach (var weather in weatherSequence)
+        {
+            var timeResults = await CalculateGaussianPlumeAsync(release, receptors, weather);
+            allResults.AddRange(timeResults);
+        }
+        
+        return allResults;
+    }
+
+    public double CalculateEffectiveReleaseRate(Release release, Chemical chemical, WeatherData weather)
+    {
+        // Start with the release rate, handle nullable values
+        double effectiveRate = release.ReleaseRate ?? 1.0; // Default 1 kg/s if not specified
+        
+        // Adjust for release type based on string values
+        switch (release.ReleaseType?.ToLower())
+        {
+            case "instantaneous":
+                // For instantaneous releases, convert total mass to equivalent continuous rate
+                effectiveRate = (release.TotalMass ?? 100) / 60.0; // Assume 1-minute release
+                break;
+            case "continuous":
+                effectiveRate = release.ReleaseRate ?? 1.0;
+                break;
+            case "evaporating":
+                // Calculate evaporation rate based on diameter/area and weather conditions
+                var poolArea = Math.PI * Math.Pow((release.DiameterOrArea ?? 10) / 2, 2); // Convert diameter to area
+                effectiveRate = CalculateEvaporationRate(chemical, weather, poolArea);
+                break;
+        }
+        
+        return Math.Max(effectiveRate, 0);
+    }
+
+    public double CalculatePlumeRise(Release release, Chemical chemical, WeatherData weather)
+    {
+        // Simplified plume rise calculation
+        // Since we don't have stack parameters, use simplified approach
+        
+        double buoyancyFlux = 0;
+        double momentumFlux = 0;
+        
+        // Use diameter/area as approximate stack diameter if available
+        var stackDiameter = release.DiameterOrArea ?? 1.0;
+        var exitVelocity = 10.0; // Default exit velocity
+        
+        // Simple momentum-driven rise
+        momentumFlux = exitVelocity * stackDiameter * stackDiameter * Math.PI / 4;
+        
+        // Temperature-driven buoyancy using initial temperature
+        var releaseTemp = release.InitialTemperature ?? weather.Temperature;
+        if (releaseTemp > weather.Temperature)
+        {
+            var deltaT = releaseTemp - weather.Temperature;
+            buoyancyFlux = 9.81 * (release.ReleaseRate ?? 1.0) * deltaT / (weather.Temperature + 273.15);
+        }
+        
+        // Simplified plume rise formula
+        double plumeRise = 0;
+        if (weather.WindSpeed > 0)
+        {
+            plumeRise = 1.6 * Math.Pow(buoyancyFlux, 1.0/3.0) * Math.Pow(weather.WindSpeed, -1.0/3.0);
+            plumeRise += momentumFlux / (Math.PI * weather.WindSpeed);
+        }
+        
+        return Math.Max(plumeRise, 0);
+    }
+
+    public (double SigmaY, double SigmaZ) CalculateDispersionCoefficients(string stabilityClass, double distance, double releaseHeight)
+    {
+        // Pasquill-Gifford dispersion coefficients
+        var coefficients = GetPasquillGiffordCoefficients(stabilityClass);
+        
+        double sigmaY = coefficients.ay * Math.Pow(distance, coefficients.by);
+        double sigmaZ = coefficients.az * Math.Pow(distance, coefficients.bz);
+        
+        // Adjust for surface reflection
+        if (releaseHeight < 100)
+        {
+            sigmaZ = Math.Min(sigmaZ, releaseHeight * 0.8);
+        }
+        
+        return (sigmaY, sigmaZ);
+    }
+
+    public string DetermineRiskLevel(double concentration, Chemical chemical)
+    {
+        // Determine risk based on concentration thresholds using ToxicityThreshold
+        var threshold = chemical.ToxicityThreshold ?? 100; // Default threshold if not specified
+        
+        if (concentration >= threshold * 0.8) return "EXTREME";
+        if (concentration >= threshold * 0.5) return "HIGH";
+        if (concentration >= threshold * 0.1) return "MODERATE";
+        if (concentration >= threshold * 0.01) return "LOW";
+        return "MINIMAL";
+    }
+
+    private string DetermineStabilityClass(WeatherData weather)
+    {
+        // Simplified stability classification based on wind speed and solar radiation
+        // In practice, this would use more sophisticated algorithms
+        
+        var windSpeed = weather.WindSpeed;
+        var timeOfDay = DateTime.Now.Hour;
+        var isDay = timeOfDay >= 6 && timeOfDay <= 18;
+        var cloudCover = weather.CloudCover ?? 0.5;
+        
+        if (isDay && cloudCover < 0.3 && windSpeed < 2) return "A"; // Very unstable
+        if (isDay && cloudCover < 0.5 && windSpeed < 3) return "B"; // Unstable
+        if (isDay && windSpeed < 5) return "C"; // Slightly unstable
+        if (windSpeed < 6) return "D"; // Neutral
+        if (!isDay && windSpeed < 3) return "F"; // Stable
+        return "E"; // Slightly stable
+    }
+
+    private double CalculateGaussianConcentration(double releaseRate, double distance, double height, double windSpeed, string stabilityClass, double crosswindDistance = 0)
+    {
+        if (windSpeed <= 0 || distance <= 0) return 0;
+        
+        var (sigmaY, sigmaZ) = CalculateDispersionCoefficients(stabilityClass, distance, height);
+        
+        // Gaussian plume formula
+        var concentration = releaseRate / (2 * Math.PI * windSpeed * sigmaY * sigmaZ);
+        
+        // Crosswind dispersion
+        var crosswindTerm = Math.Exp(-0.5 * Math.Pow(crosswindDistance / sigmaY, 2));
+        
+        // Vertical dispersion with ground reflection
+        var verticalTerm = Math.Exp(-0.5 * Math.Pow(height / sigmaZ, 2)) + 
+                          Math.Exp(-0.5 * Math.Pow((height + 2 * 0) / sigmaZ, 2)); // Ground reflection
+        
+        concentration *= crosswindTerm * verticalTerm;
+        
+        return Math.Max(concentration, 0);
+    }
+
+    private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+    {
+        // Haversine formula for distance calculation
+        const double R = 6371000; // Earth's radius in meters
+        
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(lat1 * Math.PI / 180) * Math.Cos(lat2 * Math.PI / 180) *
+                Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        
+        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+        
+        return R * c;
+    }
+
+    private double CalculateEvaporationRate(Chemical chemical, WeatherData weather, double poolArea)
+    {
+        // Simplified evaporation rate calculation
+        var tempK = weather.Temperature + 273.15;
+        var vaporPressure = (chemical.VaporPressure ?? 1000) * Math.Exp(-5000 / (8.314 * tempK)); // Simplified with default heat of vaporization
+        var evapRate = poolArea * vaporPressure * Math.Sqrt(chemical.MolecularWeight / (2 * Math.PI * 8.314 * tempK));
+        
+        // Adjust for wind speed
+        evapRate *= (1 + 0.1 * weather.WindSpeed);
+        
+        return evapRate * 1000; // Convert to mg/s
+    }
+
+    private List<(double lat, double lng, double crosswindDistance)> GenerateGridPoints(double centerLat, double centerLng, double gridSize, double maxDistance, double windDirRad)
+    {
+        var points = new List<(double lat, double lng, double crosswindDistance)>();
+        
+        // Convert grid size from meters to degrees (approximate)
+        var latStep = gridSize / 111000.0; // 1 degree ≈ 111 km
+        var lngStep = gridSize / (111000.0 * Math.Cos(centerLat * Math.PI / 180));
+        
+        var maxSteps = (int)(maxDistance / gridSize);
+        
+        for (int i = -maxSteps; i <= maxSteps; i++)
+        {
+            for (int j = -maxSteps; j <= maxSteps; j++)
+            {
+                var lat = centerLat + i * latStep;
+                var lng = centerLng + j * lngStep;
+                
+                var distance = CalculateDistance(centerLat, centerLng, lat, lng);
+                if (distance <= maxDistance)
+                {
+                    // Calculate crosswind distance for plume calculations
+                    var crosswind = Math.Abs(j * gridSize * Math.Sin(windDirRad));
+                    points.Add((lat, lng, crosswind));
+                }
+            }
+        }
+        
+        return points;
+    }
+
+    private (double ay, double by, double az, double bz) GetPasquillGiffordCoefficients(string stabilityClass)
+    {
+        // Pasquill-Gifford dispersion coefficients
+        return stabilityClass.ToUpper() switch
+        {
+            "A" => (0.22, 0.894, 0.20, 0.894),
+            "B" => (0.16, 0.894, 0.12, 0.894),
+            "C" => (0.11, 0.894, 0.08, 0.894),
+            "D" => (0.08, 0.894, 0.06, 0.894),
+            "E" => (0.06, 0.894, 0.03, 0.894),
+            "F" => (0.04, 0.894, 0.016, 0.894),
+            _ => (0.08, 0.894, 0.06, 0.894) // Default to class D
+        };
+    }
+}

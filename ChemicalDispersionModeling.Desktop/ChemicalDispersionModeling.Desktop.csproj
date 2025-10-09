@@ -1,39 +1,4 @@
-﻿about:blank:117 === JavaScript loaded and ready ===
-about:blank:118 window.chrome available: true
-about:blank:119 window.chrome.webview available: true
-about:blank:120 postMessage available: true
-about:blank:125 === Sending test message after 1 second ===
-about:blank:91 === JavaScript map click detected! ===
-about:blank:92 Coordinates: 38.51378825951165 -101.11816406250001
-about:blank:93 Container point: 529 466
-about:blank:47 Added release marker at: 38.51378825951165 -101.11816406250001
-about:blank:100 === Sending postMessage to C# ===
-about:blank:108 === PostMessage sent successfully ===
-about:blank:91 === JavaScript map click detected! ===
-about:blank:92 Coordinates: 42.19596877629178 -109.68750000000001
-about:blank:93 Container point: 334 356
-about:blank:47 Added release marker at: 42.19596877629178 -109.68750000000001
-about:blank:100 === Sending postMessage to C# ===
-about:blank:108 === PostMessage sent successfully ===
-about:blank:91 === JavaScript map click detected! ===
-about:blank:92 Coordinates: 35.67514743608467 -108.23730468750001
-about:blank:93 Container point: 367 547
-about:blank:47 Added release marker at: 35.67514743608467 -108.23730468750001
-about:blank:100 === Sending postMessage to C# ===
-about:blank:108 === PostMessage sent successfully ===
-about:blank:91 === JavaScript map click detected! ===
-about:blank:92 Coordinates: 33.284619968887675 -97.16308593750001
-about:blank:93 Container point: 619 613
-about:blank:47 Added release marker at: 33.284619968887675 -97.16308593750001
-about:blank:100 === Sending postMessage to C# ===
-about:blank:108 === PostMessage sent successfully ===
-about:blank:91 === JavaScript map click detected! ===
-about:blank:92 Coordinates: 41.672911819602085 -90.5712890625
-about:blank:93 Container point: 769 372
-about:blank:47 Added release marker at: 41.672911819602085 -90.5712890625
-about:blank:100 === Sending postMessage to C# ===
-about:blank:108 === PostMessage sent successfully ===
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>

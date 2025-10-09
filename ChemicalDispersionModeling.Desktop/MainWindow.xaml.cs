@@ -88,9 +88,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error initializing MainWindow");
-            MessageBox.Show($"Error initializing MainWindow: {ex.Message}", 
-                "Initialization Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            _logger?.LogError(ex, "Error in MainWindow constructor");
+            throw;
         }
     }
 
@@ -98,112 +97,150 @@ public partial class MainWindow : Window
     {
         try
         {
-            Console.WriteLine("=== MainWindow_Loaded Started ===");
-            _logger?.LogInformation("MainWindow_Loaded started");
-            _viewModel = DataContext as MainViewModel;
+            _logger?.LogInformation("=== MAIN WINDOW LOADED EVENT ===");
             
-            if (_viewModel == null)
+            // Use the DataContext that was already set by App.xaml.cs
+            _viewModel = this.DataContext as MainViewModel;
+            if (_viewModel != null)
             {
-                Console.WriteLine("=== ERROR: DataContext is null or not MainViewModel ===");
-                _logger?.LogError("DataContext is null or not MainViewModel");
-                MessageBox.Show("DataContext not set properly. The application may not function correctly.", 
-                    "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            Console.WriteLine("=== MainViewModel successfully bound ===");
-            _logger?.LogInformation("MainViewModel successfully bound");
-            
-            // Only initialize services if they're available (dependency injection was used)
-            if (_liveWeatherService != null && _realMappingService != null)
-            {
-                // Initialize the real map
-                _logger?.LogInformation("Starting map initialization");
-                await InitializeRealMapAsync();
+                _logger?.LogInformation("ViewModel retrieved from DataContext");
                 
-                // Start live weather monitoring for Houston, TX (default location)
-                _logger?.LogInformation("Starting weather monitoring");
-                try
-                {
-                    await _liveWeatherService.StartContinuousMonitoringAsync(
-                        29.7604, -95.3698, DataSourceType.OpenMeteo, 300);
-                }
-                catch (Exception weatherEx)
-                {
-                    _logger?.LogWarning(weatherEx, "Failed to start weather monitoring, continuing without live weather");
-                }
-                    
-                _viewModel.StatusMessage = "Application initialized with real mapping and live data";
+                // Subscribe to dispersion model completed event
+                _viewModel.DispersionModelCompleted += OnDispersionModelCompleted;
+                
+                // Set default coordinates
+                _viewModel.ReleaseLatitude = 40.7831;
+                _viewModel.ReleaseLongitude = -73.9712;
+                _logger?.LogInformation($"Default coordinates set: {_viewModel.ReleaseLatitude}, {_viewModel.ReleaseLongitude}");
             }
             else
             {
-                _viewModel.StatusMessage = "Application initialized in basic mode";
+                _logger?.LogError("Failed to get ViewModel from DataContext");
+                return;
             }
             
-            _logger?.LogInformation("MainWindow_Loaded completed successfully");
+            // Find the WebView2 control
+            _mapWebView = this.FindName("MapWebView") as WebView2;
+            _logger?.LogInformation($"WebView2 control found: {_mapWebView != null}");
+            
+            if (_mapWebView != null)
+            {
+                try
+                {
+                    _logger?.LogInformation("Ensuring WebView2 core is ready...");
+                    await _mapWebView.EnsureCoreWebView2Async();
+                    _logger?.LogInformation("WebView2 core initialized successfully");
+                    
+                    // Subscribe to web message received
+                    _mapWebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
+                    _logger?.LogInformation("WebMessageReceived event subscribed");
+                    
+                    // Load the map HTML
+                    var htmlPath = IOPath.Combine(AppDomain.CurrentDomain.BaseDirectory, "map.html");
+                    _logger?.LogInformation($"Loading map from: {htmlPath}");
+                    
+                    if (File.Exists(htmlPath))
+                    {
+                        _mapWebView.CoreWebView2.Navigate($"file:///{htmlPath.Replace('\\', '/')}");
+                        _logger?.LogInformation("Map HTML loaded successfully");
+                    }
+                    else
+                    {
+                        _logger?.LogError($"Map HTML file not found at: {htmlPath}");
+                        
+                        // Create a simple default map if file doesn't exist
+                        var defaultHtml = CreateDefaultMapHtml();
+                        _mapWebView.NavigateToString(defaultHtml);
+                        _logger?.LogInformation("Default map HTML created and loaded");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Error initializing WebView2");
+                }
+            }
+            
+            // Set up mapping service events
+            if (_realMappingService is RealMappingService realMapping && _mapWebView != null)
+            {
+                try
+                {
+                    realMapping.SetWebView(_mapWebView);
+                    realMapping.MapClicked += OnMapClicked;
+                    realMapping.MapViewChanged += OnMapViewChanged;
+                    _logger?.LogInformation("Mapping service events configured");
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Error setting up mapping service events");
+                }
+            }
+            
+            // Start live weather monitoring
+            try
+            {
+                if (_liveWeatherService != null)
+                {
+                    await _liveWeatherService.StartContinuousMonitoringAsync(_viewModel.ReleaseLatitude, _viewModel.ReleaseLongitude, DataSourceType.OpenMeteo);
+                    _logger?.LogInformation("Live weather monitoring started");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error starting live weather monitoring");
+            }
+            
+            // Start gas sensor monitoring
+            try
+            {
+                if (_gasSensorService != null)
+                {
+                    var config = new DataSourceConfiguration 
+                    { 
+                        SourceType = DataSourceType.File,
+                        PollingIntervalSeconds = 30
+                    };
+                    await _gasSensorService.StartContinuousMonitoringAsync(config);
+                    _logger?.LogInformation("Gas sensor monitoring started");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error starting gas sensor monitoring");
+            }
+            
+            _logger?.LogInformation("MainWindow loaded and all services started successfully");
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error during window loading");
-            MessageBox.Show($"Error during window loading: {ex.Message}\n\nStack trace:\n{ex.StackTrace}", 
-                "Loading Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            _logger?.LogError(ex, "Error in MainWindow_Loaded");
+            
+            // Show error to user
+            MessageBox.Show($"Error loading application: {ex.Message}", "Startup Error", 
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private async Task InitializeRealMapAsync()
+    private void CoreWebView2_WebMessageReceived(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
     {
         try
         {
-            Console.WriteLine("=== Initializing real mapping service ===");
-            _logger?.LogInformation("Initializing real mapping service");
-
-            // Find the WebView2 in the XAML (we'll need to add it)
-            _mapWebView = FindName("MapWebView") as WebView2;
-            Console.WriteLine($"=== WebView2 from XAML: {_mapWebView != null} ===");
+            var message = e.TryGetWebMessageAsString();
+            _logger?.LogInformation($"WebMessage received: {message}");
             
-            if (_mapWebView == null)
+            // Parse the JSON message for map clicks
+            if (!string.IsNullOrEmpty(message) && message.Contains("mapClick"))
             {
-                Console.WriteLine("=== Creating WebView2 programmatically ===");
-                // Create WebView2 programmatically if not found in XAML
-                _mapWebView = new WebView2();
-                
-                // Find the map container and add WebView2
-                var mapContainer = FindName("MapContainer") as Border;
-                Console.WriteLine($"=== MapContainer found: {mapContainer != null} ===");
-                if (mapContainer != null)
+                dynamic? data = System.Text.Json.JsonSerializer.Deserialize<dynamic>(message);
+                if (data != null)
                 {
-                    mapContainer.Child = _mapWebView;
-                    Console.WriteLine("=== WebView2 added to MapContainer ===");
+                    _logger?.LogInformation($"Parsed map click data: {data}");
                 }
-            }
-
-            Console.WriteLine($"=== WebView2 ready: {_mapWebView != null} ===");
-            Console.WriteLine($"=== RealMappingService type: {_realMappingService?.GetType().Name} ===");
-            if (_mapWebView != null && _realMappingService is RealMappingService realMapping)
-            {
-                Console.WriteLine("=== Calling SetWebView ===");
-                realMapping.SetWebView(_mapWebView);
-                Console.WriteLine("=== Calling InitializeAsync ===");
-                await realMapping.InitializeAsync(MapProvider.OpenStreetMap);
-                Console.WriteLine("=== InitializeAsync completed ===");
-                
-                // Set default view to Houston, TX area
-                await realMapping.SetMapViewAsync(29.7604, -95.3698, 10);
-                
-                // Subscribe to map events
-                Console.WriteLine($"Subscribing to map events...");
-                realMapping.MapClicked += OnMapClicked;
-                realMapping.MapViewChanged += OnMapViewChanged;
-                Console.WriteLine($"Map events subscribed successfully");
-                
-                _logger?.LogInformation("Real mapping service initialized successfully");
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error initializing real map");
-            MessageBox.Show($"Error initializing map: {ex.Message}", "Map Error", 
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            _logger?.LogError(ex, "Error processing web message");
         }
     }
 
@@ -211,16 +248,16 @@ public partial class MainWindow : Window
     {
         try
         {
+            _logger?.LogInformation($"Live weather data received: Temp={weatherData.Temperature}°C, Wind={weatherData.WindSpeed} m/s");
+            
             Dispatcher.Invoke(() =>
             {
                 if (_viewModel != null)
                 {
                     _viewModel.CurrentWeather = weatherData;
-                    _viewModel.StatusMessage = $"Weather updated: {weatherData.Temperature:F1}�C, Wind: {weatherData.WindSpeed:F1} m/s from {weatherData.WindDirection:F0}�";
+                    _logger?.LogInformation("Weather data updated in ViewModel");
                 }
             });
-            
-            _logger?.LogInformation($"Weather data received: {weatherData.Temperature:F1}�C, Wind: {weatherData.WindSpeed:F1} m/s");
         }
         catch (Exception ex)
         {
@@ -232,38 +269,20 @@ public partial class MainWindow : Window
     {
         try
         {
+            _logger?.LogInformation($"Gas sensor data received: {readings.Count()} readings");
+            
             Dispatcher.Invoke(() =>
             {
                 if (_viewModel != null)
                 {
-                    var readingList = readings.ToList();
-                    _viewModel.StatusMessage = $"Gas sensor data received: {readingList.Count} readings";
-                    
-                    // Add gas sensors to map
-                    foreach (var reading in readingList)
+                    // Process the readings - could display them, trigger alerts, etc.
+                    var latestReading = readings.LastOrDefault();
+                    if (latestReading != null)
                     {
-                        Task.Run(async () =>
-                        {
-                            var sensor = new GasSensor
-                            {
-                                Id = reading.SensorId,
-                                Name = reading.SensorLocation,
-                                Latitude = reading.Latitude,
-                                Longitude = reading.Longitude,
-                                LatestReading = reading,
-                                IsOnline = true
-                            };
-                            
-                            if (_realMappingService != null)
-                            {
-                                await _realMappingService.AddGasSensorAsync(sensor);
-                            }
-                        });
+                        _logger?.LogInformation($"Latest reading: {latestReading.Concentration} {latestReading.ConcentrationUnit} at {latestReading.SensorLocation}");
                     }
                 }
             });
-            
-            _logger?.LogInformation($"Gas sensor data received: {readings.Count()} readings");
         }
         catch (Exception ex)
         {
@@ -287,12 +306,22 @@ public partial class MainWindow : Window
                 if (_viewModel != null)
                 {
                     _logger?.LogInformation($"BEFORE UPDATE - Current location: Lat={_viewModel.ReleaseLatitude:F6}, Lng={_viewModel.ReleaseLongitude:F6}");
+                    
+                    // Update coordinates
                     _viewModel.ReleaseLatitude = e.Latitude;
                     _viewModel.ReleaseLongitude = e.Longitude;
+                    
+                    _logger?.LogInformation($"AFTER UPDATE - New location: Lat={_viewModel.ReleaseLatitude:F6}, Lng={_viewModel.ReleaseLongitude:F6}");
+                    
+                    // Update status messages
                     _viewModel.StatusMessage = $"Setting release location to {e.Latitude:F6}, {e.Longitude:F6}...";
                     _viewModel.DebugStatus = $"Debug: Map clicked at {e.Latitude:F6}, {e.Longitude:F6}";
-                    _logger?.LogInformation($"AFTER UPDATE - New location: Lat={_viewModel.ReleaseLatitude:F6}, Lng={_viewModel.ReleaseLongitude:F6}");
+                    
                     _logger?.LogInformation($"Status message set: {_viewModel.StatusMessage}");
+                    _logger?.LogInformation("UI binding should update automatically via ObservableProperty");
+                    
+                    // Force UI refresh by updating multiple times
+                    _viewModel.StatusMessage = $"Release location updated: {e.Latitude:F6}, {e.Longitude:F6}";
                 }
                 else
                 {
@@ -361,6 +390,8 @@ public partial class MainWindow : Window
             }
             
             _logger?.LogInformation($"Map clicked: {e.Latitude:F6}, {e.Longitude:F6}, weather updated, marker placed");
+            
+            // Note: Dispersion modeling will be triggered by the "Run Model" button, not automatically on map click
         }
         catch (Exception ex)
         {
@@ -375,448 +406,537 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnDispersionModelCompleted(object? sender, DispersionModelCompletedEventArgs e)
+    {
+        try
+        {
+            _logger?.LogInformation("=== DISPERSION MODEL COMPLETED EVENT ===");
+            _logger?.LogInformation($"Results count: {e.Results.Count()}");
+            
+            if (_realMappingService != null && e.Results.Any())
+            {
+                // Clear any existing plumes first
+                await _realMappingService.ClearDispersionOverlaysAsync();
+                _logger?.LogInformation("Cleared existing dispersion overlays");
+
+                var dispersionVisualization = new DispersionVisualizationOptions
+                {
+                    ConcentrationLevels = new List<double> { 0.1, 1.0, 10.0, 100.0 }, // mg/m³
+                    ContourColors = new List<string> { "#00FF00", "#FFFF00", "#FFA500", "#FF0000" },
+                    Opacity = 0.7,
+                    ShowConcentrationLabels = true,
+                    ShowFootprint = true,
+                    ShowCenterline = true
+                };
+
+                await _realMappingService.AddDispersionGridAsync(e.Results, dispersionVisualization);
+                _logger?.LogInformation("Dispersion plume visualization added to map from Run Model button");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error handling dispersion model completed event");
+        }
+    }
+
+    private async Task RunDispersionModelingAsync(double latitude, double longitude)
+    {
+        try
+        {
+            _logger?.LogInformation($"=== STARTING DISPERSION MODELING ===");
+            
+            if (_dispersionService == null || _viewModel == null)
+            {
+                _logger?.LogWarning("Dispersion service or view model is null - cannot run modeling");
+                return;
+            }
+            
+            var weather = _viewModel.CurrentWeather;
+            if (weather == null)
+            {
+                _logger?.LogWarning("No weather data available - cannot run dispersion modeling");
+                Dispatcher.Invoke(() =>
+                {
+                    _viewModel.StatusMessage = "Weather data not available for dispersion modeling";
+                });
+                return;
+            }
+            
+            // Create release object from current settings
+            var chemical = _viewModel.SelectedChemical ?? new Chemical 
+            { 
+                Name = _viewModel.ChemicalName,
+                MolecularWeight = _viewModel.MolecularWeight,
+                Density = _viewModel.Density,
+                ToxicityThreshold = 100 // Default threshold
+            };
+            
+            var release = new Release
+            {
+                Name = "Map Click Release",
+                Latitude = latitude,
+                Longitude = longitude,
+                ReleaseHeight = _viewModel.ReleaseHeight,
+                Chemical = chemical,
+                ChemicalId = chemical.Id,
+                ReleaseType = _viewModel.ReleaseType,
+                ReleaseRate = _viewModel.ReleaseRate,
+                TotalMass = _viewModel.TotalMass,
+                StartTime = DateTime.Now,
+                Scenario = _viewModel.ReleaseScenario,
+                DiameterOrArea = 5.0, // Default 5m diameter
+                InitialTemperature = weather.Temperature + 20, // Assume release is warmer
+                ModelingWindSpeed = weather.WindSpeed,
+                ModelingWindDirection = weather.WindDirection,
+                ModelingStabilityClass = "D", // Neutral stability
+                ModelingTemperature = weather.Temperature,
+                ModelingHumidity = weather.Humidity
+            };
+            
+            _logger?.LogInformation($"Release configuration: Rate={release.ReleaseRate}, Height={release.ReleaseHeight}, Chemical={chemical.Name}");
+            
+            // Calculate dispersion grid
+            _logger?.LogInformation("Calculating dispersion grid...");
+            var dispersionResults = await _dispersionService.CalculateDispersionGridAsync(
+                release, 
+                weather, 
+                gridSize: 100,    // 100m grid resolution
+                maxDistance: 5000 // 5km maximum distance
+            );
+            
+            var resultsList = dispersionResults.ToList();
+            _logger?.LogInformation($"Dispersion modeling completed: {resultsList.Count} grid points calculated");
+            
+            // Display the plume on the map
+            if (resultsList.Any() && _realMappingService != null)
+            {
+                _logger?.LogInformation("Adding dispersion plume to map...");
+                
+                var dispersionVisualization = new DispersionVisualizationOptions
+                {
+                    ConcentrationLevels = new List<double> { 0.1, 1.0, 10.0, 100.0 }, // mg/m³
+                    ContourColors = new List<string> { "#00FF00", "#FFFF00", "#FFA500", "#FF0000" },
+                    Opacity = 0.7,
+                    ShowConcentrationLabels = true,
+                    ShowFootprint = true,
+                    ShowCenterline = true
+                };
+                
+                // Use the new grid visualization method
+                if (_realMappingService is RealMappingService realMappingService)
+                {
+                    await realMappingService.AddDispersionGridAsync(resultsList, dispersionVisualization);
+                    _logger?.LogInformation("Dispersion grid visualization added to map successfully");
+                }
+                else
+                {
+                    // Fallback to single result visualization
+                    var combinedResult = new DispersionResult
+                    {
+                        Latitude = latitude,
+                        Longitude = longitude,
+                        Concentration = resultsList.Max(r => r.Concentration),
+                        ConcentrationUnit = "mg/m³",
+                        CalculationTime = DateTime.Now,
+                        WindSpeed = weather.WindSpeed,
+                        WindDirection = weather.WindDirection,
+                        Temperature = weather.Temperature,
+                        RiskLevel = resultsList.Where(r => r.Concentration > 1.0).Any() ? "HIGH" : "LOW"
+                    };
+                    
+                    await _realMappingService.AddDispersionPlumeAsync(combinedResult, dispersionVisualization);
+                    _logger?.LogInformation("Dispersion plume added to map successfully");
+                }
+                
+                // Update status
+                Dispatcher.Invoke(() =>
+                {
+                    var maxConc = resultsList.Max(r => r.Concentration);
+                    var highRiskPoints = resultsList.Count(r => r.Concentration > chemical.ToxicityThreshold * 0.1);
+                    _viewModel.StatusMessage = $"Dispersion calculated: Max concentration {maxConc:F2} mg/m³, {highRiskPoints} high-risk points";
+                });
+            }
+            else
+            {
+                _logger?.LogWarning("No dispersion results generated or mapping service unavailable");
+                Dispatcher.Invoke(() =>
+                {
+                    _viewModel.StatusMessage = "Dispersion modeling completed but no significant concentrations found";
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error running dispersion modeling");
+            Dispatcher.Invoke(() =>
+            {
+                if (_viewModel != null)
+                {
+                    _viewModel.StatusMessage = $"Dispersion modeling error: {ex.Message}";
+                }
+            });
+        }
+    }
+
     private void OnMapViewChanged(object? sender, MapViewChangedEventArgs e)
     {
         try
         {
-            _logger?.LogDebug($"Map view changed: Center {e.CenterLatitude:F6}, {e.CenterLongitude:F6}, Zoom {e.ZoomLevel}");
+            _logger?.LogInformation($"Map view changed: Center=({e.CenterLatitude}, {e.CenterLongitude}), Zoom={e.ZoomLevel}");
+            
+            // For now, just log the change - we can add map state tracking later
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error processing map view change");
+            _logger?.LogError(ex, "Error handling map view change");
         }
     }
 
-    private void TestLocationUpdate_Click(object sender, RoutedEventArgs e)
+    private string CreateDefaultMapHtml()
     {
-        try
-        {
-            Console.WriteLine($"=== TEST LOCATION UPDATE CLICKED ===");
-            
-            // Test coordinates (New York City)
-            double testLat = 40.7128;
-            double testLng = -74.0060;
-            
-            Console.WriteLine($"Simulating map click at NYC: {testLat:F6}, {testLng:F6}");
-            
-            // Create a simulated map click event
-            var testArgs = new MapClickEventArgs
-            {
-                Latitude = testLat,
-                Longitude = testLng,
-                ScreenX = 100,
-                ScreenY = 100,
-                IsRightClick = false
-            };
-            
-            // Call the map click handler directly
-            OnMapClicked(this, testArgs);
-            
-            Console.WriteLine($"Test location update completed");
+        return @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chemical Dispersion Map</title>
+    <meta charset='utf-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+          integrity='sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY='
+          crossorigin='' />
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; }
+        .plume-legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error in test location update: {ex.Message}");
-            _logger?.LogError(ex, "Error in test location update");
+        .legend-item {
+            margin: 2px 0;
+            display: flex;
+            align-items: center;
         }
-    }
-
-    private void TestMapClick_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Console.WriteLine("=== TEST MAP CLICK BUTTON PRESSED ===");
-            MessageBox.Show("Testing map click functionality...", "Map Test", MessageBoxButton.OK, MessageBoxImage.Information);
+        .legend-color {
+            width: 20px;
+            height: 15px;
+            margin-right: 5px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div id='map'></div>
+    <div id='plume-legend' class='plume-legend' style='display: none;'>
+        <div style='font-weight: bold; margin-bottom: 5px;'>Concentration (mg/m³)</div>
+        <div id='legend-content'></div>
+    </div>
+    
+    <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+            integrity='sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo='
+            crossorigin=''></script>
+    <script>
+        // Initialize map
+        var map = L.map('map').setView([40.7831, -73.9712], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        
+        // Map state
+        var currentMarker = null;
+        var dispersionLayers = {};
+        var plumeOverlays = L.layerGroup().addTo(map);
+        
+        // Color schemes for concentration visualization
+        var colorSchemes = {
+            'rainbow': ['#0000FF', '#00FFFF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000'],
+            'heat': ['#000080', '#0000FF', '#00FF00', '#FFFF00', '#FF8000', '#FF0000'],
+            'grayscale': ['#000000', '#333333', '#666666', '#999999', '#CCCCCC', '#FFFFFF']
+        };
+        
+        // Utility function to interpolate between colors
+        function interpolateColor(color1, color2, factor) {
+            var result = color1.slice();
+            for (var i = 0; i < 3; i++) {
+                result[i] = Math.round(result[i] + factor * (color2[i] - result[i]));
+            }
+            return result;
+        }
+        
+        // Convert hex color to RGB array
+        function hexToRgb(hex) {
+            var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? [
+                parseInt(result[1], 16),
+                parseInt(result[2], 16),
+                parseInt(result[3], 16)
+            ] : null;
+        }
+        
+        // Convert RGB array to hex
+        function rgbToHex(rgb) {
+            return '#' + ((1 << 24) + (rgb[0] << 16) + (rgb[1] << 8) + rgb[2]).toString(16).slice(1);
+        }
+        
+        // Get color for concentration value
+        function getConcentrationColor(concentration, maxConcentration, colors) {
+            if (concentration <= 0) return 'transparent';
             
-            // Test if WebView2 is accessible
-            if (_mapWebView != null)
-            {
-                Console.WriteLine($"WebView2 found: {_mapWebView.Source}");
-                MessageBox.Show($"WebView2 Status:\nFound: Yes\nSource: {_mapWebView.Source}\nCoreWebView2: {(_mapWebView.CoreWebView2 != null ? "Initialized" : "Not Initialized")}", 
-                    "WebView2 Status", MessageBoxButton.OK, MessageBoxImage.Information);
+            var ratio = Math.min(concentration / maxConcentration, 1.0);
+            var colorIndex = ratio * (colors.length - 1);
+            var index1 = Math.floor(colorIndex);
+            var index2 = Math.min(index1 + 1, colors.length - 1);
+            var factor = colorIndex - index1;
+            
+            var rgb1 = hexToRgb(colors[index1]);
+            var rgb2 = hexToRgb(colors[index2]);
+            
+            if (!rgb1 || !rgb2) return colors[index1];
+            
+            var interpolated = interpolateColor(rgb1, rgb2, factor);
+            return rgbToHex(interpolated);
+        }
+        
+        // Create contour polygons from grid data
+        function createContourPolygons(gridData, contourLevels, colors, opacity) {
+            var polygons = [];
+            
+            for (var i = 0; i < contourLevels.length; i++) {
+                var level = contourLevels[i];
+                var color = colors[i] || colors[colors.length - 1];
                 
-                // Try to manually trigger a map click event for testing
-                if (_realMappingService != null)
-                {
-                    Console.WriteLine("Manually triggering map click event...");
-                    var testArgs = new MapClickEventArgs
-                    {
-                        Latitude = 29.7604, // Houston coordinates
-                        Longitude = -95.3698,
-                        ScreenX = 100,
-                        ScreenY = 100,
-                        IsRightClick = false
-                    };
-                    
-                    // Manually call the map click handler
-                    OnMapClicked(_realMappingService, testArgs);
-                    MessageBox.Show("Manual map click event triggered!", "Test Result", MessageBoxButton.OK, MessageBoxImage.Information);
+                // Find all grid points above this level
+                var contourPoints = [];
+                for (var j = 0; j < gridData.length; j++) {
+                    var point = gridData[j];
+                    if (point.concentration >= level) {
+                        contourPoints.push([point.latitude, point.longitude, point.concentration]);
+                    }
                 }
-                else
-                {
-                    MessageBox.Show("RealMappingService is null!", "Test Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                
+                if (contourPoints.length > 0) {
+                    // Create convex hull or use simplified contour
+                    var polygon = createContourFromPoints(contourPoints, level);
+                    if (polygon && polygon.length > 2) {
+                        var leafletPolygon = L.polygon(polygon, {
+                            color: color,
+                            fillColor: color,
+                            fillOpacity: opacity * 0.6,
+                            opacity: opacity,
+                            weight: 2
+                        });
+                        
+                        // Add popup with concentration info
+                        leafletPolygon.bindPopup(`Concentration: ≥ ${level.toFixed(2)} mg/m³`);
+                        polygons.push(leafletPolygon);
+                    }
                 }
             }
-            else
-            {
-                MessageBox.Show("WebView2 not found!", "Test Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Test Map Click Error: {ex.Message}");
-            MessageBox.Show($"Test Map Click Error: {ex.Message}", "Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void OpenDevTools_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Console.WriteLine("=== OPENING WEBVIEW2 DEV TOOLS ===");
             
-            if (_mapWebView?.CoreWebView2 != null)
-            {
-                _mapWebView.CoreWebView2.OpenDevToolsWindow();
-                MessageBox.Show("Developer Tools opened! Check the Console tab to see JavaScript output.", 
-                    "Dev Tools", MessageBoxButton.OK, MessageBoxImage.Information);
+            return polygons;
+        }
+        
+        // Simplified contour creation from points
+        function createContourFromPoints(points, level) {
+            if (points.length < 3) return null;
+            
+            // Find bounding box
+            var minLat = Math.min(...points.map(p => p[0]));
+            var maxLat = Math.max(...points.map(p => p[0]));
+            var minLng = Math.min(...points.map(p => p[1]));
+            var maxLng = Math.max(...points.map(p => p[1]));
+            
+            // Create approximate contour polygon
+            var margin = 0.001; // Approximate margin in degrees
+            return [
+                [minLat - margin, minLng - margin],
+                [maxLat + margin, minLng - margin],
+                [maxLat + margin, maxLng + margin],
+                [minLat - margin, maxLng + margin],
+                [minLat - margin, minLng - margin]
+            ];
+        }
+        
+        // Main function to add dispersion plume
+        function addDispersionPlume(overlayId, data) {
+            console.log('Adding dispersion plume:', overlayId, data);
+            
+            // Clear existing plume if it exists
+            if (dispersionLayers[overlayId]) {
+                clearDispersionPlume(overlayId);
             }
-            else
-            {
-                MessageBox.Show("WebView2 CoreWebView2 not initialized yet!", 
-                    "Dev Tools Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            
+            var layers = [];
+            
+            // Create contour polygons if we have grid data
+            if (data.gridData && data.gridData.length > 0) {
+                var maxConc = Math.max(...data.gridData.map(p => p.concentration));
+                var contourLevels = data.contourLevels || [maxConc * 0.1, maxConc * 0.3, maxConc * 0.6, maxConc];
+                var colors = data.colors || colorSchemes.heat;
+                var opacity = data.opacity || 0.7;
+                
+                var polygons = createContourPolygons(data.gridData, contourLevels, colors, opacity);
+                layers = layers.concat(polygons);
+                
+                // Update legend
+                updatePlumeeLegend(contourLevels, colors, data.unit || 'mg/m³');
+                
+                console.log(`Created ${polygons.length} contour polygons`);
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Open Dev Tools Error: {ex.Message}");
-            MessageBox.Show($"Error opening dev tools: {ex.Message}", "Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    // Menu Command Handlers - Now with real functionality
-    private void NewProject_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (_viewModel != null)
-            {
-                _viewModel.ResetToDefaults();
-                _viewModel.StatusMessage = "New project created";
-            }
-            _logger?.LogInformation("New project created");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error creating new project");
-            MessageBox.Show($"Error creating new project: {ex.Message}", "Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void OpenProject_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var openFileDialog = new OpenFileDialog
-            {
-                Filter = "Chemical Dispersion Projects (*.cdp)|*.cdp|All files (*.*)|*.*",
-                Title = "Open Project"
-            };
-
-            if (openFileDialog.ShowDialog() == true)
-            {
-                // TODO: Implement project loading
-                _viewModel?.UpdateStatusMessage($"Project loaded: {IOPath.GetFileName(openFileDialog.FileName)}");
-                _logger?.LogInformation($"Project opened: {openFileDialog.FileName}");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error opening project");
-            MessageBox.Show($"Error opening project: {ex.Message}", "Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void SaveProject_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var saveFileDialog = new SaveFileDialog
-            {
-                Filter = "Chemical Dispersion Projects (*.cdp)|*.cdp|All files (*.*)|*.*",
-                Title = "Save Project"
-            };
-
-            if (saveFileDialog.ShowDialog() == true)
-            {
-                // TODO: Implement project saving
-                _viewModel?.UpdateStatusMessage($"Project saved: {IOPath.GetFileName(saveFileDialog.FileName)}");
-                _logger?.LogInformation($"Project saved: {saveFileDialog.FileName}");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error saving project");
-            MessageBox.Show($"Error saving project: {ex.Message}", "Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private async void RunModel_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (_viewModel == null || _dispersionService == null || _realMappingService == null) 
-            {
-                MessageBox.Show("Required services not available. Please restart the application.", 
-                    "Service Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            _viewModel.StatusMessage = "Running dispersion model...";
-
-            // Create release scenario from current settings
-            var release = new Release
-            {
-                Name = "Emergency Release",
-                Latitude = _viewModel.ReleaseLatitude,
-                Longitude = _viewModel.ReleaseLongitude,
-                ReleaseHeight = _viewModel.ReleaseHeight,
-                StartTime = DateTime.UtcNow,
-                EndTime = DateTime.UtcNow.AddMinutes(_viewModel.ReleaseDuration),
-                ReleaseRate = _viewModel.ReleaseRate,
-                ReleaseType = "Continuous",
-                Scenario = "Gas",
-                Chemical = new Chemical 
-                { 
-                    Name = _viewModel.ChemicalName,
-                    MolecularWeight = _viewModel.MolecularWeight,
-                    Density = _viewModel.Density,
-                    VaporPressure = _viewModel.VaporPressure
-                }
-            };
-
-            // Use current weather data
-            var weatherData = _viewModel.CurrentWeather ?? new WeatherData
-            {
-                Temperature = _viewModel.Temperature,
-                WindSpeed = _viewModel.WindSpeed,
-                WindDirection = _viewModel.WindDirection,
-                StabilityClass = _viewModel.StabilityClass,
-                Timestamp = DateTime.UtcNow,
-                StationId = "USER_INPUT",
-                Latitude = _viewModel.ReleaseLatitude,
-                Longitude = _viewModel.ReleaseLongitude,
-                Pressure = 1013.25,
-                Humidity = 60.0,
-                Source = "Manual Input"
-            };
-
-            // Create receptors for grid calculation
-            var receptors = new List<Receptor>();
-            for (int i = 0; i < 10; i++)
-            {
-                for (int j = 0; j < 10; j++)
-                {
-                    receptors.Add(new Receptor
-                    {
-                        Name = $"Grid_{i}_{j}",
-                        Latitude = _viewModel.ReleaseLatitude + (i - 5) * 0.001,
-                        Longitude = _viewModel.ReleaseLongitude + (j - 5) * 0.001,
-                        Height = 1.5 // Breathing height
+            
+            // Create heat map style visualization for individual points
+            if (data.coordinates && data.coordinates.length > 0) {
+                for (var i = 0; i < data.coordinates.length; i++) {
+                    var coord = data.coordinates[i];
+                    var polygon = L.polygon(coord, {
+                        color: data.color || '#FF0000',
+                        fillColor: data.fillColor || data.color || '#FF0000',
+                        fillOpacity: (data.opacity || 0.7) * 0.6,
+                        opacity: data.opacity || 0.7,
+                        weight: 2
                     });
+                    
+                    polygon.bindPopup(`Chemical Dispersion Zone<br/>Click for details`);
+                    layers.push(polygon);
                 }
             }
-
-            // Run dispersion model
-            var results = await _dispersionService.CalculateGaussianPlumeAsync(release, receptors, weatherData);
-
-            if (results?.Any() == true)
-            {
-                var firstResult = results.First();
-                // Display results on map
-                var visualizationOptions = new DispersionVisualizationOptions
-                {
-                    ConcentrationLevels = new List<double> { 0.001, 0.01, 0.1, 1.0 },
-                    ContourColors = new List<string> { "#00FF00", "#FFFF00", "#FF8000", "#FF0000" },
-                    Opacity = 0.6,
-                    ShowConcentrationLabels = true,
-                    ShowFootprint = true
-                };
-
-                await _realMappingService.AddDispersionPlumeAsync(firstResult, visualizationOptions);
+            
+            // Add all layers to the map
+            var layerGroup = L.layerGroup(layers);
+            layerGroup.addTo(plumeOverlays);
+            dispersionLayers[overlayId] = layerGroup;
+            
+            console.log(`Added ${layers.length} dispersion layers for overlay ${overlayId}`);
+        }
+        
+        // Clear specific dispersion plume
+        function clearDispersionPlume(overlayId) {
+            if (dispersionLayers[overlayId]) {
+                plumeOverlays.removeLayer(dispersionLayers[overlayId]);
+                delete dispersionLayers[overlayId];
+                console.log('Cleared dispersion plume:', overlayId);
+            }
+        }
+        
+        // Clear all dispersion overlays
+        function clearAllDispersionPlumes() {
+            Object.keys(dispersionLayers).forEach(function(overlayId) {
+                clearDispersionPlume(overlayId);
+            });
+            hidePlumeeLegend();
+            console.log('Cleared all dispersion plumes');
+        }
+        
+        // Update plume legend
+        function updatePlumeeLegend(levels, colors, unit) {
+            var legend = document.getElementById('plume-legend');
+            var content = document.getElementById('legend-content');
+            
+            content.innerHTML = '';
+            
+            for (var i = levels.length - 1; i >= 0; i--) {
+                var item = document.createElement('div');
+                item.className = 'legend-item';
                 
-                _viewModel.StatusMessage = $"Model completed. {results.Count()} concentration points calculated.";
-                _logger?.LogInformation("Dispersion model completed successfully");
+                var colorBox = document.createElement('div');
+                colorBox.className = 'legend-color';
+                colorBox.style.backgroundColor = colors[i] || colors[colors.length - 1];
+                
+                var label = document.createElement('span');
+                label.textContent = `≥ ${levels[i].toFixed(2)} ${unit}`;
+                
+                item.appendChild(colorBox);
+                item.appendChild(label);
+                content.appendChild(item);
             }
-            else
-            {
-                _viewModel.StatusMessage = "Model failed to run";
-                _logger?.LogWarning("Dispersion model returned null result");
-            }
+            
+            legend.style.display = 'block';
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error running dispersion model");
-            _viewModel?.UpdateStatusMessage($"Model error: {ex.Message}");
-            MessageBox.Show($"Error running model: {ex.Message}", "Model Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
+        
+        // Hide plume legend
+        function hidePlumeeLegend() {
+            document.getElementById('plume-legend').style.display = 'none';
         }
-    }
-
-    private async void ImportWeatherData_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (_liveWeatherService == null)
-            {
-                MessageBox.Show("Weather service not available.", "Service Error", 
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+        
+        // Add release source marker
+        function addReleaseMarker(lat, lng, data) {
+            if (currentMarker) {
+                map.removeLayer(currentMarker);
             }
-
-            var openFileDialog = new OpenFileDialog
-            {
-                Filter = "CSV Files (*.csv)|*.csv|JSON Files (*.json)|*.json|All files (*.*)|*.*",
-                Title = "Import Weather Data"
+            
+            var icon = L.divIcon({
+                className: 'release-marker',
+                html: '<div style=""background-color: red; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);""></div>',
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            });
+            
+            currentMarker = L.marker([lat, lng], { icon: icon }).addTo(map);
+            
+            var popupContent = `<strong>Release Source</strong><br/>`;
+            popupContent += `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br/>`;
+            if (data && data.chemical) {
+                popupContent += `Chemical: ${data.chemical}<br/>`;
+            }
+            if (data && data.rate) {
+                popupContent += `Release Rate: ${data.rate} kg/s<br/>`;
+            }
+            
+            currentMarker.bindPopup(popupContent);
+        }
+        
+        // Map click handler
+        map.on('click', function(e) {
+            addReleaseMarker(e.latlng.lat, e.latlng.lng);
+            
+            var message = {
+                type: 'mapClick',
+                latitude: e.latlng.lat,
+                longitude: e.latlng.lng,
+                screenX: e.containerPoint.x,
+                screenY: e.containerPoint.y
             };
-
-            if (openFileDialog.ShowDialog() == true)
-            {
-                var extension = IOPath.GetExtension(openFileDialog.FileName).ToLower();
-
-                // Read weather data from file (this would need to be implemented)
-                var weatherData = await _liveWeatherService.GetLocalWeatherAsync(
-                    openFileDialog.FileName, DataSourceType.File);
-
-                if (weatherData != null && _viewModel != null)
-                {
-                    _viewModel.CurrentWeather = weatherData;
-                    _viewModel.StatusMessage = $"Weather data imported from {IOPath.GetFileName(openFileDialog.FileName)}";
-                }
-                
-                _logger?.LogInformation($"Weather data imported: {openFileDialog.FileName}");
+            
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage(JSON.stringify(message));
             }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error importing weather data");
-            MessageBox.Show($"Error importing weather data: {ex.Message}", "Import Error", 
-                MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void ConfigureDataSources_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            // TODO: Open data source configuration dialog
-            MessageBox.Show("Data source configuration dialog will be implemented here.\n\n" +
-                          "Supported sources:\n" +
-                          "� Serial (NMEA 0183)\n" +
-                          "� TCP/UDP Network\n" +
-                          "� OSI PI\n" +
-                          "� OPC/UA\n" +
-                          "� MODBUS\n" +
-                          "� File Import (CSV, JSON, XML)",
-                          "Data Sources", MessageBoxButton.OK, MessageBoxImage.Information);
-                          
-            _logger?.LogInformation("Data source configuration requested");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error opening data source configuration");
-        }
-    }
-
-    private void ZoomIn_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            // TODO: Implement map zoom in
-            _logger?.LogInformation("Zoom in requested");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error zooming in");
-        }
-    }
-
-    private void ZoomOut_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            // TODO: Implement map zoom out
-            _logger?.LogInformation("Zoom out requested");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error zooming out");
-        }
-    }
-
-    private async void ClearResults_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            if (_realMappingService != null)
-            {
-                await _realMappingService.ClearDispersionOverlaysAsync();
-                _viewModel?.UpdateStatusMessage("Results cleared");
-                _logger?.LogInformation("Dispersion results cleared");
-            }
-            else
-            {
-                MessageBox.Show("Mapping service not available.", "Service Error", 
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error clearing results");
-        }
-    }
-
-    private void About_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            MessageBox.Show("Chemical Dispersion Modeling Application\n" +
-                          "Version 1.0.0\n\n" +
-                          "Real-time chemical dispersion modeling with:\n" +
-                          "� NOAA ALOHA-compliant models\n" +
-                          "� Live weather data integration\n" +
-                          "� Industrial sensor connectivity\n" +
-                          "� Professional mapping\n\n" +
-                          "Built with .NET 8 WPF",
-                          "About", MessageBoxButton.OK, MessageBoxImage.Information);
-                          
-            _logger?.LogInformation("About dialog shown");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error showing about dialog");
-        }
+        });
+        
+        // Expose functions globally for C# integration
+        window.addDispersionPlume = addDispersionPlume;
+        window.clearDispersionPlume = clearDispersionPlume;
+        window.clearAllDispersionPlumes = clearAllDispersionPlumes;
+        window.addReleaseMarker = addReleaseMarker;
+        
+        console.log('Chemical Dispersion Map initialized with plume visualization');
+    </script>
+</body>
+</html>";
     }
 
     protected override void OnClosed(EventArgs e)
     {
         try
         {
-            // Clean up resources
+            // Stop live services
             _liveWeatherService?.StopContinuousMonitoringAsync();
             _gasSensorService?.StopContinuousMonitoringAsync();
             
-        // Unsubscribe from events
-        if (_liveWeatherService != null)
-            _liveWeatherService.WeatherDataReceived -= OnWeatherDataReceived;
-        
-        if (_gasSensorService != null)
-            _gasSensorService.GasSensorDataReceived -= OnGasSensorDataReceived;            if (_realMappingService is RealMappingService realMapping)
+            // Unsubscribe from events
+            if (_liveWeatherService != null)
+                _liveWeatherService.WeatherDataReceived -= OnWeatherDataReceived;
+            
+            if (_gasSensorService != null)
+                _gasSensorService.GasSensorDataReceived -= OnGasSensorDataReceived;
+                
+            if (_realMappingService is RealMappingService realMapping)
             {
                 realMapping.MapClicked -= OnMapClicked;
                 realMapping.MapViewChanged -= OnMapViewChanged;
