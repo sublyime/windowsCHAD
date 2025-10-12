@@ -37,14 +37,14 @@
     "@typescript-eslint/parser": "^6.13.0",
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.2",
-    "electron": "^28.0.0",
+    "electron": "^35.7.5",
     "electron-builder": "^24.8.0",
     "eslint": "^8.55.0",
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "nodemon": "^3.0.2",
     "typescript": "^5.3.3",
-    "vite": "^5.0.8"
+    "vite": "^7.1.9"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.0.1",
